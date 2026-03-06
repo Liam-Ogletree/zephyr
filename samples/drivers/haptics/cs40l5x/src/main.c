@@ -26,12 +26,12 @@
 
 LOG_MODULE_REGISTER(main);
 
-#define CS40L5X_DEMO_REDC              (0xCC)
-#define CS40L5X_DEMO_F0                (0x258)
-#define CS40L5X_DEMO_INDEX             (17)
-#define CS40L5X_DEMO_INFINITE_DURATION (0)
-#define CS40L5X_DEMO_FREQUENCY         (240)
-#define CS40L5X_DEMO_LEVEL             (27)
+#define CS40L5X_DEMO_REDC              0xCC
+#define CS40L5X_DEMO_F0                0x258
+#define CS40L5X_DEMO_INDEX             17
+#define CS40L5X_DEMO_INFINITE_DURATION 0
+#define CS40L5X_DEMO_FREQUENCY         240
+#define CS40L5X_DEMO_LEVEL             27
 
 const struct device *cs40l5x = DEVICE_DT_GET(DT_ALIAS(haptic0));
 
