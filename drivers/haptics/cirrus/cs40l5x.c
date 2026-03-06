@@ -444,7 +444,7 @@ static int cs40l5x_multi_write(const struct device *const dev,
 static int cs40l5x_poll(const struct device *const dev, const uint32_t addr, const uint32_t val,
 			const k_timeout_t timeout)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	const k_timepoint_t end = sys_timepoint_calc(timeout);
 	uint32_t reg_val;
 	int ret;
@@ -525,7 +525,7 @@ static inline bool cs40l5x_valid_wavetable_source(const struct device *const dev
 static int cs40l5x_write_mailbox(const struct device *const dev, const uint32_t mailbox_command)
 {
 	const k_timepoint_t end = sys_timepoint_calc(CS40L5X_T_WAKESOURCE);
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
 	do {
@@ -588,8 +588,8 @@ static int cs40l5x_reset_mailbox(const struct device *const dev)
 
 static int cs40l5x_wait_for_amplifier(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
 	const k_timepoint_t end = sys_timepoint_calc(CS40L5X_T_WAIT);
+	const struct cs40l5x_config *const config = dev->config;
 	const struct cs40l5x_data *const data = dev->data;
 
 	do {
@@ -608,7 +608,7 @@ static int cs40l5x_wait_for_amplifier(const struct device *const dev)
 
 static void cs40l5x_mailbox_log(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	struct cs40l5x_mailbox_item item;
 	int ret;
@@ -773,8 +773,8 @@ static void cs40l5x_error_callback(const struct device *const dev, const uint32_
 
 static int cs40l5x_process_mailbox(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
 	uint32_t mbox_rd_ptr, mbox_status, mbox_val, mbox_wr_ptr;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -872,7 +872,7 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 static int cs40l5x_process_interrupts(const struct device *const dev,
 				      const uint32_t *const irq_ints)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	uint32_t error_bitmask = 0;
 	int ret;
 
@@ -1067,7 +1067,7 @@ static void cs40l5x_interrupt_handler(const struct device *port, struct gpio_cal
 {
 	struct cs40l5x_data *const data = CONTAINER_OF(cb, struct cs40l5x_data, interrupt_callback);
 	const struct device *const dev = data->dev;
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
 	ret = k_work_schedule(&data->interrupt_worker, CS40L5X_T_INTERRUPT_DEBOUNCER);
@@ -1112,7 +1112,7 @@ static int cs40l5x_irq_config(const struct device *const dev)
 
 static int cs40l5x_click_compensation(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	const struct cs40l5x_data *const data = dev->data;
 	int32_t enable = 0;
 
@@ -1262,7 +1262,7 @@ static void cs40l5x_dsp_config(const struct device *const dev)
 
 static int cs40l5x_timeout_config(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	uint32_t active_timeout[3], standby_timeout[3];
 	int ret;
 
@@ -1329,7 +1329,7 @@ static int cs40l5x_boost_configuration(const struct device *const dev)
 
 static int cs40l5x_fingerprint(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	uint32_t otpid, rx[2];
 	int ret;
@@ -1630,7 +1630,7 @@ static int cs40l5x_calibrate_f0(const struct device *const dev, uint32_t *const 
 static int cs40l5x_run_calibration(const struct device *const dev, uint32_t *const redc,
 				   uint32_t *const f0)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
 	ret = cs40l5x_calibrate_redc(dev, redc);
@@ -1722,7 +1722,7 @@ error_pm:
 int cs40l5x_configure_buzz(const struct device *const dev, const uint32_t frequency,
 			   const uint8_t level, const uint32_t duration)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1841,7 +1841,7 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 
 int cs40l5x_logger(const struct device *const dev, enum cs40l5x_logger logger_state)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	uint32_t state, update;
 	int ret;
 
@@ -1887,7 +1887,7 @@ error_pm:
 int cs40l5x_logger_get(const struct device *const dev, enum cs40l5x_logger_source source,
 		       enum cs40l5x_logger_source_type type, uint32_t *const value)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	int offset, ret;
 
 	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_DSP_LOGGER)) {
@@ -1927,7 +1927,7 @@ static int cs40l5x_register_error_callback(const struct device *dev, haptics_err
 int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_bank bank,
 			  const uint8_t index)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	uint32_t output;
 	int ret;
@@ -1970,7 +1970,7 @@ int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_ban
 
 int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	uint32_t attenuation;
 	int ret;
@@ -2017,7 +2017,7 @@ error_pm:
 
 static int cs40l5x_start_output(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	struct cs40l5x_mailbox_item item;
 	int ret, warning;
@@ -2062,7 +2062,7 @@ error_pm:
 
 static int cs40l5x_stop_output(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -2156,7 +2156,7 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 		       const uint16_t redc, const uint16_t f0, const int8_t *const samples,
 		       const uint16_t num_samples)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -2279,7 +2279,7 @@ int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custo
 			const struct cs40l5x_pwle_section *const sections,
 			const uint8_t num_sections)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
