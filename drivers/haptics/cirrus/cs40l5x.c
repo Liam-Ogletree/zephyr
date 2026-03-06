@@ -521,7 +521,7 @@ static int cs40l5x_write_mailbox(const struct device *const dev, const uint32_t 
 
 static int cs40l5x_increment_mailbox(const struct device *const dev, uint32_t *const mbox_ptr)
 {
-	if (*mbox_ptr + CS40L5X_REG_WIDTH <= CS40L5X_REG_DSP_MBOX_8) {
+	if (*mbox_ptr < CS40L5X_REG_DSP_MBOX_8) {
 		*mbox_ptr += CS40L5X_REG_WIDTH;
 	} else {
 		*mbox_ptr = CS40L5X_REG_DSP_MBOX_2;
