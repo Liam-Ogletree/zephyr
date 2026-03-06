@@ -5,15 +5,11 @@
  */
 
 #include <errno.h>
-#include <inttypes.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/flash.h>
 #include <zephyr/drivers/haptics/cs40l5x.h>
-#include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/pm/device.h>
 #include <zephyr/pm/device_runtime.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
