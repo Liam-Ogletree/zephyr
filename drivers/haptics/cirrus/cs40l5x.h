@@ -26,20 +26,6 @@ struct cs40l5x_calibration {
 };
 
 /**
- * @brief Structure to store GPIO trigger configurations
- */
-struct cs40l5x_trigger_config {
-	/**< Wavetable source for desired haptic effect */
-	enum cs40l5x_bank bank;
-	/**< Wavetable index for desired haptic effect */
-	uint8_t index;
-	/**< Attenuation to be applied to haptic effect */
-	int attenuation;
-	/**< Offset register address that stores the GPIO trigger configuration */
-	uint8_t address;
-};
-
-/**
  * @brief Structure to store and handle trigger GPIOs
  */
 struct cs40l5x_trigger_gpios {
@@ -47,10 +33,10 @@ struct cs40l5x_trigger_gpios {
 	struct gpio_dt_spec *gpio;
 	/**< Number of GPIOs provided via devicetree property 'trigger-gpios' */
 	const uint8_t num_gpio;
-	/**< Trigger configurations for rising-edge events */
-	struct cs40l5x_trigger_config *rising_edge;
-	/**< Trigger configurations for falling-edge events */
-	struct cs40l5x_trigger_config *falling_edge;
+	/**< Addresses for rising-edge events */
+	uint8_t *rising_edge;
+	/**< Addresses for falling-edge events */
+	uint8_t *falling_edge;
 	/**< GPIO statuses */
 	bool *ready;
 };

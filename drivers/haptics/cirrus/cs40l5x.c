@@ -1572,10 +1572,9 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 {
 	const struct cs40l5x_config *const config = dev->config;
 	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-	struct cs40l5x_trigger_config *trigger_config;
 	struct cs40l5x_data *const data = dev->data;
+	uint8_t *address, i;
 	uint32_t playback;
-	uint8_t i;
 	int ret;
 
 	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER) || gpios->num_gpio == 0) {
@@ -1619,19 +1618,15 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 		goto error_pm;
 	}
 
-	trigger_config = (edge == CS40L5X_RISING_EDGE) ? gpios->rising_edge : gpios->falling_edge;
+	address = (edge == CS40L5X_RISING_EDGE) ? gpios->rising_edge : gpios->falling_edge;
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_GPIO_EVENT_BASE | trigger_config[i].address, playback);
+	ret = cs40l5x_write(dev, CS40L5X_REG_GPIO_EVENT_BASE | (uint32_t)address[i], playback);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "failed to update trigger playback (%d)", ret);
-	} else {
-		trigger_config[i].bank = bank;
-		trigger_config[i].index = index;
-		trigger_config[i].attenuation = attenuation;
-
-		LOG_INST_INF(config->log, "configure | %s %u -> %s %u (%d dB)", gpio->port->name,
-			     gpio->pin, cs40l5x_print_bank(bank), index, attenuation);
 	}
+
+	LOG_INST_INF(config->log, "configure | %s %u -> %s %u (%d dB)", gpio->port->name,
+			     gpio->pin, cs40l5x_print_bank(bank), index, attenuation);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -2357,65 +2352,33 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 	.custom_effects = {false, false}, .calibration = {.f0 = 0, .redc = 0},
 
 #define HAPTICS_CS40L5X_FALLING_DEFAULT(inst, prop, idx)                                           \
-	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 3, .attenuation = -4, .address = 0x38},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 13, .attenuation = -6, .address = 0x40},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 17, .attenuation = -6, .address = 0x48},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 19, .attenuation = -6, .address = 0x50},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 14, .attenuation = -6, .address = 0x58},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 15, .attenuation = -6, .address = 0x60},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 5, .attenuation = -4, .address = 0x68},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 23, .attenuation = -6, .address = 0x70},),	   \
-		(EMPTY))
+	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)), (0x38,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)), (0x40,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)), (0x48,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)), (0x50,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),	(0x58,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),	(0x60,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),	(0x68,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)), (0x70,), (EMPTY))
 
 #define HAPTICS_CS40L5X_RISING_DEFAULT(inst, prop, idx)                                            \
-	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 3, .attenuation = 0, .address = 0x3C},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 13, .attenuation = 0, .address = 0x44},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 17, .attenuation = 0, .address = 0x4C},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 19, .attenuation = 0, .address = 0x54},),	   \
-		(EMPTY))                            \
-	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 14, .attenuation = 0, .address = 0x5C},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 15, .attenuation = 0, .address = 0x64},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 5, .attenuation = 0, .address = 0x6C},),	   \
-		(EMPTY))                           \
-	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)),					   \
-		({.bank = CS40L5X_ROM_BANK, .index = 23, .attenuation = 0, .address = 0x74},),	   \
-		(EMPTY))
+	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)), (0x3C,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)), (0x44,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)), (0x4C,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)), (0x54,),	(EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),	(0x5C,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),	(0x64,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),	(0x6C,), (EMPTY))                                                                                \
+	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)),	(0x74,), (EMPTY))
 
 #define HAPTICS_CS40L5X_FALLING_DEFAULTS(inst)                                                     \
-	(struct cs40l5x_trigger_config[DT_INST_PROP_LEN(inst, trigger_mapping)])                   \
+	(uint8_t[DT_INST_PROP_LEN(inst, trigger_mapping)])                                         \
 	{                                                                                          \
 		DT_INST_FOREACH_PROP_ELEM(inst, trigger_mapping, HAPTICS_CS40L5X_FALLING_DEFAULT)  \
 	}
 
 #define HAPTICS_CS40L5X_RISING_DEFAULTS(inst)                                                      \
-	(struct cs40l5x_trigger_config[DT_INST_PROP_LEN(inst, trigger_mapping)])                   \
+	(uint8_t[DT_INST_PROP_LEN(inst, trigger_mapping)])                                         \
 	{                                                                                          \
 		DT_INST_FOREACH_PROP_ELEM(inst, trigger_mapping, HAPTICS_CS40L5X_RISING_DEFAULT)   \
 	}
