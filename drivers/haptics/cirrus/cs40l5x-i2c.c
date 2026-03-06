@@ -9,14 +9,9 @@
  * @brief I2C Driver for Cirrus Logic CS40L5x Haptic Devices
  */
 
-#include <zephyr/drivers/haptics/cs40l5x.h>
-
 #if CONFIG_HAPTICS_CS40L5X_I2C
-#include <zephyr/drivers/i2c.h>
-#include <zephyr/logging/log.h>
+#include <zephyr/drivers/haptics/cs40l5x.h>
 #include <zephyr/sys/byteorder.h>
-
-LOG_MODULE_REGISTER(CS40L5X_I2C, CONFIG_HAPTICS_LOG_LEVEL);
 
 #define CS40L5X_REG_WIDTH  4
 #define CS40L5X_ADDR_WIDTH CS40L5X_REG_WIDTH
