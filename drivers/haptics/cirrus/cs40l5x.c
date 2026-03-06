@@ -2653,11 +2653,6 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 			.ready = NULL},)							   \
 	)
 
-#define HAPTICS_CS40L5X_IRQ(inst)                                                                  \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, int_gpios),					   \
-		(.interrupt_gpio = GPIO_DT_SPEC_INST_GET(inst, int_gpios),),			   \
-		(.interrupt_gpio = {.port = NULL, .pin = 0},))
-
 #define HAPTICS_CS40L5X_FLASH_DEVICE(inst)                                                         \
 	DEVICE_DT_GET_OR_NULL(DT_MTD_FROM_FIXED_PARTITION(DT_INST_PHANDLE(inst, flash_storage)))
 
@@ -2683,10 +2678,11 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 #define HAPTICS_CS40L5X_CONFIG(inst, id)                                                           \
 	.dev = DEVICE_DT_INST_GET(inst), .data = &cs40l5x_data_##inst, .dev_id = id,               \
 	.reset_gpio = GPIO_DT_SPEC_INST_GET(inst, reset_gpios),                                    \
+	.interrupt_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, 0),                            \
 	.external_boost = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, external_boost)),            \
 	LOG_INSTANCE_PTR_INIT(log, DT_NODE_FULL_NAME_TOKEN(DT_DRV_INST(inst)), inst)               \
-		HAPTICS_CS40L5X_BUS(inst) HAPTICS_CS40L5X_IRQ(inst)                                \
-			HAPTICS_CS40L5X_TRIGGER_GPIOS(inst) HAPTICS_CS40L5X_FLASH(inst)
+		HAPTICS_CS40L5X_BUS(inst) HAPTICS_CS40L5X_TRIGGER_GPIOS(inst)                      \
+			HAPTICS_CS40L5X_FLASH(inst)
 
 #define HAPTICS_CS40L5X_INIT(inst)                                                                 \
 	PM_DEVICE_DT_INST_DEFINE(inst, cs40l5x_pm_action);                                         \
