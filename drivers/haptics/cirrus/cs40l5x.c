@@ -729,11 +729,14 @@ static int cs40l5x_trigger_irq_config(const struct device *dev)
 		return -ENODEV;
 	}
 
-	(void)gpio_init_callback(&data->trigger_callback, cs40l5x_trigger_handler, pin_mask);
+	gpio_init_callback(&data->trigger_callback, cs40l5x_trigger_handler, pin_mask);
 
 	for (int i = 0; i < gpios->num_gpio; i++) {
 		if ((pin_mask & BIT(gpios->gpio[i].pin)) != 0) {
-			(void)gpio_add_callback_dt(&gpios->gpio[i], &data->trigger_callback);
+			ret = gpio_add_callback_dt(&gpios->gpio[i], &data->trigger_callback);
+			if (ret < 0) {
+				return ret;
+			}
 		}
 	}
 
@@ -765,7 +768,7 @@ static void cs40l5x_error_callback(const struct device *const dev, const uint32_
 	struct cs40l5x_data *const data = dev->data;
 
 	if (data->error_callback != NULL) {
-		(void)data->error_callback(dev, error_bitmask, data->user_data);
+		data->error_callback(dev, error_bitmask, data->user_data);
 	}
 }
 
@@ -818,12 +821,12 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 			break;
 		case CS40L5X_MBOX_PLAYBACK_START_MBOX:
 			data->effects_in_flight += 1;
-			(void)cs40l5x_mailbox_log(dev);
+			cs40l5x_mailbox_log(dev);
 			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
 			break;
 		case CS40L5X_MBOX_PLAYBACK_START_GPIO:
 			data->effects_in_flight += 1;
-			(void)cs40l5x_trigger_log(dev);
+			cs40l5x_trigger_log(dev);
 			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
 			break;
 		case CS40L5X_MBOX_INIT:
@@ -837,19 +840,19 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 			break;
 		case CS40L5X_MBOX_REDC_EST_DONE:
 			LOG_INST_DBG(config->log, "complete  | ReDC calibration");
-			(void)k_sem_give(&data->calibration_semaphore);
+			k_sem_give(&data->calibration_semaphore);
 			break;
 		case CS40L5X_MBOX_F0_EST_START:
 			LOG_INST_DBG(config->log, "start     | F0 calibration");
 			break;
 		case CS40L5X_MBOX_F0_EST_DONE:
 			LOG_INST_DBG(config->log, "complete  | F0 calibration");
-			(void)k_sem_give(&data->calibration_semaphore);
+			k_sem_give(&data->calibration_semaphore);
 			break;
 		case CS40L5X_MBOX_PERMANENT_SHORT_DETECTED:
 			__fallthrough;
 		case CS40L5X_MBOX_RUNTIME_SHORT_DETECTED:
-			(void)cs40l5x_error_callback(dev, HAPTICS_ERROR_OVERCURRENT);
+			cs40l5x_error_callback(dev, HAPTICS_ERROR_OVERCURRENT);
 
 			return 0;
 		default:
@@ -941,7 +944,7 @@ static int cs40l5x_process_interrupts(const struct device *const dev,
 	}
 
 	if (error_bitmask != 0) {
-		(void)cs40l5x_error_callback(dev, error_bitmask);
+		cs40l5x_error_callback(dev, error_bitmask);
 	}
 
 	return 0;
@@ -1099,11 +1102,10 @@ static int cs40l5x_irq_config(const struct device *const dev)
 		return ret;
 	}
 
-	(void)gpio_init_callback(&data->interrupt_callback, cs40l5x_interrupt_handler,
-				 BIT(config->interrupt_gpio.pin));
-	(void)gpio_add_callback_dt(&config->interrupt_gpio, &data->interrupt_callback);
+	gpio_init_callback(&data->interrupt_callback, cs40l5x_interrupt_handler,
+			   BIT(config->interrupt_gpio.pin));
 
-	return ret;
+	return gpio_add_callback_dt(&config->interrupt_gpio, &data->interrupt_callback);
 }
 
 static int cs40l5x_click_compensation(const struct device *const dev)
@@ -1437,7 +1439,7 @@ static int cs40l5x_bringup(const struct device *const dev)
 		LOG_INST_WRN(config->log, "failed errata update (%d)", ret);
 	};
 
-	(void)cs40l5x_dsp_config(dev);
+	cs40l5x_dsp_config(dev);
 
 	if (CS40L5X_ANY_DEV_USE_HIBERNATION) {
 		ret = cs40l5x_timeout_config(dev);
@@ -2486,7 +2488,7 @@ static int cs40l5x_init(const struct device *dev)
 	}
 
 	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		(void)k_work_init_delayable(&data->interrupt_worker, cs40l5x_interrupt_worker);
+		k_work_init_delayable(&data->interrupt_worker, cs40l5x_interrupt_worker);
 	}
 
 	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
