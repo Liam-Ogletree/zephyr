@@ -213,16 +213,6 @@ enum cs40l5x_irq {
 	CS40L5X_INT22,
 };
 
-struct cs40l5x_mailbox_item {
-	uint8_t bank: 3;
-	uint8_t index: 5;
-};
-
-struct cs40l5x_trigger_item {
-	uint8_t edge: 1;
-	uint8_t gpio: 7;
-};
-
 struct cs40l5x_multi_write {
 	uint32_t *buf;
 	size_t len;
@@ -468,20 +458,6 @@ static int cs40l5x_poll(const struct device *const dev, const uint32_t addr, con
 	return -EBUSY;
 }
 
-static inline enum cs40l5x_bank cs40l5x_bank_from_cmd(const uint32_t cmd)
-{
-	switch (cmd & CS40L5X_MASK_BANK) {
-	case CS40L5X_ROM_BANK_CMD:
-		return CS40L5X_ROM_BANK;
-	case CS40L5X_CUSTOM_BANK_CMD:
-		return CS40L5X_CUSTOM_BANK;
-	case CS40L5X_BUZ_BANK_CMD:
-		return CS40L5X_BUZ_BANK;
-	default:
-		return CS40L5X_NO_BANK;
-	}
-}
-
 static inline char *cs40l5x_print_bank(const uint32_t bank)
 {
 	switch (bank) {
@@ -586,42 +562,6 @@ static int cs40l5x_reset_mailbox(const struct device *const dev)
 	return cs40l5x_write(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, mbox_ptr);
 }
 
-static int cs40l5x_wait_for_amplifier(const struct device *const dev)
-{
-	const k_timepoint_t end = sys_timepoint_calc(CS40L5X_T_WAIT);
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_data *const data = dev->data;
-
-	do {
-		if (ring_buf_is_empty(&data->rb_trigger_history) &&
-		    ring_buf_is_empty(&data->rb_mailbox_history) && data->effects_in_flight == 0) {
-			return 0;
-		}
-
-		(void)k_sleep(CS40L5X_T_DEFAULT_DELAY);
-	} while (!sys_timepoint_expired(end));
-
-	LOG_INST_ERR(config->log, "timed out waiting for amplifier (%d)", -EBUSY);
-
-	return -EBUSY;
-}
-
-static void cs40l5x_mailbox_log(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	struct cs40l5x_mailbox_item item;
-	int ret;
-
-	ret = ring_buf_get(&data->rb_mailbox_history, (uint8_t *)&item, 1);
-	if (ret <= 0) {
-		LOG_INST_DBG(config->log, "playback  | UNK");
-		return;
-	}
-
-	LOG_INST_DBG(config->log, "playback  | %s %u", cs40l5x_print_bank(item.bank), item.index);
-}
-
 static int cs40l5x_get_trigger_gpio(const struct device *const dev,
 				    const struct gpio_dt_spec *const gpio, uint8_t *const index)
 {
@@ -641,102 +581,6 @@ static int cs40l5x_get_trigger_gpio(const struct device *const dev,
 
 	if (*index == gpios->num_gpio) {
 		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static void cs40l5x_trigger_log(const struct device *const dev)
-{
-	struct cs40l5x_trigger_config *trigger_config;
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	struct cs40l5x_trigger_item item;
-	int ret;
-
-	ret = ring_buf_get(&data->rb_trigger_history, (uint8_t *)&item, 1);
-	if (ret <= 0) {
-		LOG_INST_DBG(config->log, "trigger   | UNK");
-		return;
-	}
-
-	trigger_config = (item.edge == CS40L5X_GPIO_LOGIC_HIGH)
-				 ? config->trigger_gpios.rising_edge
-				 : config->trigger_gpios.falling_edge;
-
-	LOG_INST_DBG(config->log, "trigger   | %s %u (%d dB)",
-		     cs40l5x_print_bank(trigger_config[item.gpio].bank),
-		     trigger_config[item.gpio].index, trigger_config[item.gpio].attenuation);
-}
-
-static void cs40l5x_trigger_handler(const struct device *port, struct gpio_callback *cb,
-				    uint32_t pins)
-{
-	struct cs40l5x_data *const data = CONTAINER_OF(cb, struct cs40l5x_data, trigger_callback);
-	struct gpio_dt_spec triggered_gpio = {.port = port, .pin = find_lsb_set(pins) - 1};
-	const struct device *const dev = data->dev;
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-	struct cs40l5x_trigger_item item;
-	uint8_t i;
-	int ret;
-
-	if (cs40l5x_get_trigger_gpio(data->dev, &triggered_gpio, &i) < 0) {
-		LOG_INST_ERR(config->log, "failed to retrieve trigger GPIO (%d)", -EINVAL);
-		return;
-	}
-
-	ret = gpio_pin_get_raw(gpios->gpio[i].port, gpios->gpio[i].pin);
-	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed to get GPIO level in callback (%d)", ret);
-		return;
-	}
-
-	item.gpio = i;
-	item.edge = (uint8_t)ret;
-
-	ret = ring_buf_put(&data->rb_trigger_history, (uint8_t *)&item, 1);
-	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed to cache trigger playback (%d)", ret);
-	}
-}
-
-static int cs40l5x_trigger_irq_config(const struct device *dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-	struct cs40l5x_data *const data = dev->data;
-	gpio_port_pins_t pin_mask = 0;
-	int ret;
-
-	for (int i = 0; i < gpios->num_gpio; i++) {
-		if (!gpios->ready[i]) {
-			continue;
-		}
-
-		ret = gpio_pin_interrupt_configure_dt(&gpios->gpio[i], GPIO_INT_EDGE_BOTH);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "skipped %s (%d)", gpios->gpio[i].port->name,
-				     ret);
-			continue;
-		}
-
-		pin_mask |= BIT(gpios->gpio[i].pin);
-	}
-
-	if (pin_mask == 0) {
-		return -ENODEV;
-	}
-
-	gpio_init_callback(&data->trigger_callback, cs40l5x_trigger_handler, pin_mask);
-
-	for (int i = 0; i < gpios->num_gpio; i++) {
-		if ((pin_mask & BIT(gpios->gpio[i].pin)) != 0) {
-			ret = gpio_add_callback_dt(&gpios->gpio[i], &data->trigger_callback);
-			if (ret < 0) {
-				return ret;
-			}
-		}
 	}
 
 	return 0;
@@ -809,24 +653,16 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 
 		switch (mbox_val) {
 		case CS40L5X_MBOX_PLAYBACK_COMPLETE_MBOX:
-			data->effects_in_flight -= 1;
 			LOG_INST_DBG(config->log, "complete  | mailbox playback");
-			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
 			break;
 		case CS40L5X_MBOX_PLAYBACK_COMPLETE_GPIO:
-			data->effects_in_flight -= 1;
 			LOG_INST_DBG(config->log, "complete  | trigger playback");
-			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
 			break;
 		case CS40L5X_MBOX_PLAYBACK_START_MBOX:
-			data->effects_in_flight += 1;
-			cs40l5x_mailbox_log(dev);
-			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
+			LOG_INST_DBG(config->log, "mailbox playback started");
 			break;
 		case CS40L5X_MBOX_PLAYBACK_START_GPIO:
-			data->effects_in_flight += 1;
-			cs40l5x_trigger_log(dev);
-			LOG_INST_DBG(config->log, "effects in flight: %d", data->effects_in_flight);
+			LOG_INST_DBG(config->log, "trigger playback started");
 			break;
 		case CS40L5X_MBOX_INIT:
 			LOG_INST_DBG(config->log, "awake after reset");
@@ -1470,14 +1306,6 @@ static int cs40l5x_bringup(const struct device *const dev)
 		if (ret < 0) {
 			LOG_INST_WRN(config->log, "failed trigger configuration (%d)", ret);
 		}
-
-		if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER_INTERRUPTS)) {
-			ret = cs40l5x_trigger_irq_config(dev);
-			if (ret < 0) {
-				LOG_INST_WRN(config->log, "failed trigger IRQ configuration (%d)",
-					     ret);
-			}
-		}
 	}
 
 	ret = cs40l5x_write(dev, CS40L5X_REG_BUZZ_RES, CS40L5X_BUZ_1MS_RES);
@@ -1503,28 +1331,6 @@ static int cs40l5x_disable_irq(const struct device *const dev)
 	return gpio_remove_callback_dt(&config->interrupt_gpio, &data->interrupt_callback);
 }
 
-static int cs40l5x_disable_trigger_irq(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const trigger_gpios = &config->trigger_gpios;
-	struct cs40l5x_data *const data = dev->data;
-	int ret = 0;
-
-	for (int i = 0; i < trigger_gpios->num_gpio; i++) {
-		ret = gpio_pin_interrupt_configure_dt(&trigger_gpios->gpio[i], GPIO_INT_DISABLE);
-		if (ret < 0) {
-			return ret;
-		}
-
-		ret = gpio_remove_callback_dt(&trigger_gpios->gpio[i], &data->trigger_callback);
-		if (ret < 0) {
-			return ret;
-		}
-	}
-
-	return ret;
-}
-
 static int cs40l5x_teardown(const struct device *const dev)
 {
 	const struct cs40l5x_config *const config = dev->config;
@@ -1534,13 +1340,6 @@ static int cs40l5x_teardown(const struct device *const dev)
 		ret = cs40l5x_disable_irq(dev);
 		if (ret < 0) {
 			LOG_INST_DBG(config->log, "failed to disable IRQ (%d)", ret);
-		}
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER)) {
-		ret = cs40l5x_disable_trigger_irq(dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to disable trigger IRQ (%d)", ret);
 		}
 	}
 
@@ -1669,11 +1468,6 @@ int cs40l5x_calibrate(const struct device *const dev)
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
-	}
-
-	ret = cs40l5x_wait_for_amplifier(dev);
-	if (ret < 0) {
-		goto error_mutex;
 	}
 
 	if (config->interrupt_gpio.port == NULL) {
@@ -1992,11 +1786,6 @@ int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain)
 		goto error_pm;
 	}
 
-	ret = cs40l5x_wait_for_amplifier(dev);
-	if (ret < 0) {
-		goto error_mutex;
-	}
-
 	attenuation = (gain == 0) ? CS40L5X_MAX_ATTENUATION : (uint32_t)cs40l5x_src_atten[gain];
 
 	ret = cs40l5x_write(data->dev, CS40L5X_REG_SOURCE_ATTENUATION, attenuation);
@@ -2006,7 +1795,6 @@ int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain)
 		LOG_INST_INF(config->log, "configure | gain -> %d%%", gain);
 	}
 
-error_mutex:
 	(void)k_mutex_unlock(&data->lock);
 
 error_pm:
@@ -2019,8 +1807,7 @@ static int cs40l5x_start_output(const struct device *const dev)
 {
 	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
-	struct cs40l5x_mailbox_item item;
-	int ret, warning;
+	int ret;
 
 	ret = pm_device_runtime_get(dev);
 	if (ret < 0) {
@@ -2037,20 +1824,9 @@ static int cs40l5x_start_output(const struct device *const dev)
 	ret = cs40l5x_write_mailbox(dev, data->output);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "failed to start playback (%d)", ret);
-	} else {
-		item.bank = (uint8_t)cs40l5x_bank_from_cmd(data->output);
-		item.index = (uint8_t)FIELD_GET(CS40L5X_MASK_INDEX, data->output);
-
-		if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_IRQ)) {
-			warning = ring_buf_put(&data->rb_mailbox_history, (uint8_t *)&item, 1);
-			if (warning < 0) {
-				LOG_INST_DBG(config->log, "failed to cache playback (%d)", warning);
-			}
-		} else {
-			LOG_INST_INF(config->log, "sent      | %s %u",
-				     cs40l5x_print_bank(item.bank), item.index);
-		}
 	}
+
+	LOG_INST_INF(config->log, "sent      | %s %u", cs40l5x_print_bank(item.bank), item.index);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -2182,11 +1958,6 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 		goto error_pm;
 	}
 
-	ret = cs40l5x_wait_for_amplifier(dev);
-	if (ret < 0) {
-		goto error_mutex;
-	}
-
 	ret = cs40l5x_upload_pcm_header(dev, index, redc, f0, num_samples);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "failed to write PCM header (%d)", ret);
@@ -2303,11 +2074,6 @@ int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custo
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
-	}
-
-	ret = cs40l5x_wait_for_amplifier(dev);
-	if (ret < 0) {
-		goto error_mutex;
 	}
 
 	ret = cs40l5x_upload_pwle_header(dev, index, sections, num_sections);
@@ -2501,19 +2267,6 @@ static int cs40l5x_init(const struct device *dev)
 
 	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
 		k_work_init_delayable(&data->interrupt_worker, cs40l5x_interrupt_worker);
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		(void)ring_buf_init(&data->rb_mailbox_history,
-				    CONFIG_HAPTICS_CS40L5X_METADATA_CACHE_LEN,
-				    data->buf_mailbox_history);
-
-		if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER) &&
-		    config->trigger_gpios.num_gpio > 0) {
-			(void)ring_buf_init(&data->rb_trigger_history,
-					    CONFIG_HAPTICS_CS40L5X_METADATA_CACHE_LEN,
-					    data->buf_trigger_history);
-		}
 	}
 
 	if (!cs40l5x_is_ready(dev)) {

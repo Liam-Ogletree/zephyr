@@ -186,8 +186,6 @@ struct cs40l5x_data {
 	struct gpio_callback interrupt_callback;
 	/**< Worker for debounced interrupt processing */
 	struct k_work_delayable interrupt_worker;
-	/**< Callback handler for trigger logging */
-	struct gpio_callback trigger_callback;
 	/**< Application-provided callback to recover from fatal hardware errors */
 	haptics_error_callback_t error_callback;
 	/**< Application-provided user data for callback context */
@@ -198,18 +196,8 @@ struct cs40l5x_data {
 	struct cs40l5x_calibration calibration;
 	/**< Playback command for mailbox-triggered haptic effects */
 	uint32_t output;
-	/**< Ring buffer to cache mailbox playback history */
-	struct ring_buf rb_mailbox_history;
-	/**< Ring buffer to cache trigger playback history */
-	struct ring_buf rb_trigger_history;
-	/**< Ring buffer storage for cached mailbox playback history */
-	uint8_t buf_mailbox_history[CONFIG_HAPTICS_CS40L5X_METADATA_CACHE_LEN];
-	/**< Ring buffer storage for cached trigger playback history */
-	uint8_t buf_trigger_history[CONFIG_HAPTICS_CS40L5X_METADATA_CACHE_LEN];
 	/**< Upload status for custom effects at indices 0 and 1 */
 	bool custom_effects[CS40L5X_NUM_CUSTOM_EFFECTS];
-	/**< Number of haptic effects playing or suspended */
-	int effects_in_flight;
 };
 
 #ifdef __cplusplus
