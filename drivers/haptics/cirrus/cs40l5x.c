@@ -676,7 +676,8 @@ static void cs40l5x_trigger_handler(const struct device *port, struct gpio_callb
 {
 	struct cs40l5x_data *const data = CONTAINER_OF(cb, struct cs40l5x_data, trigger_callback);
 	struct gpio_dt_spec triggered_gpio = {.port = port, .pin = find_lsb_set(pins) - 1};
-	const struct cs40l5x_config *const config = data->config;
+	const struct device *const dev = data->dev;
+	const struct cs40l5x_config *const config = dev->config;
 	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
 	struct cs40l5x_trigger_item item;
 	uint8_t i;
@@ -997,7 +998,8 @@ static void cs40l5x_interrupt_worker(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 	struct cs40l5x_data *data = CONTAINER_OF(dwork, struct cs40l5x_data, interrupt_worker);
-	const struct cs40l5x_config *const config = data->config;
+	const struct device *const dev = data->dev;
+	const struct cs40l5x_config *const config = dev->config;
 	uint32_t irq1_status, irq_ints[CS40L5X_NUM_IRQ1_INT];
 	int ret;
 
@@ -1065,7 +1067,8 @@ static void cs40l5x_interrupt_handler(const struct device *port, struct gpio_cal
 				      uint32_t pins)
 {
 	struct cs40l5x_data *const data = CONTAINER_OF(cb, struct cs40l5x_data, interrupt_callback);
-	__maybe_unused const struct cs40l5x_config *const config = data->config;
+	const struct device *const dev = data->dev;
+	__maybe_unused const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
 	ret = k_work_schedule(&data->interrupt_worker, CS40L5X_T_INTERRUPT_DEBOUNCER);
@@ -2560,9 +2563,8 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 	)
 
 #define HAPTICS_CS40L5X_DATA(inst)                                                                 \
-	.dev = DEVICE_DT_INST_GET(inst), .config = &cs40l5x_config_##inst, .error_callback = NULL, \
-	.output = CS40L5X_ROM_BANK_CMD, .custom_effects = {false, false},                          \
-	.calibration = {.f0 = 0, .redc = 0},
+	.dev = DEVICE_DT_INST_GET(inst), .error_callback = NULL, .output = CS40L5X_ROM_BANK_CMD,   \
+	.custom_effects = {false, false}, .calibration = {.f0 = 0, .redc = 0},
 
 #define HAPTICS_CS40L5X_FALLING_DEFAULT(inst, prop, idx)                                           \
 	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)),					   \
@@ -2676,7 +2678,7 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 			.bus_io = &cs40l5x_bus_io_spi,))
 
 #define HAPTICS_CS40L5X_CONFIG(inst, id)                                                           \
-	.dev = DEVICE_DT_INST_GET(inst), .data = &cs40l5x_data_##inst, .dev_id = id,               \
+	.dev = DEVICE_DT_INST_GET(inst), .dev_id = id,                                             \
 	.reset_gpio = GPIO_DT_SPEC_INST_GET(inst, reset_gpios),                                    \
 	.interrupt_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, 0),                            \
 	.external_boost = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, external_boost)),            \
@@ -2698,8 +2700,6 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 	HAPTICS_CS40L5X_BUILD_ASSERTS(inst)                                                        \
 	LOG_INSTANCE_REGISTER(DT_NODE_FULL_NAME_TOKEN(DT_DRV_INST(inst)), inst,                    \
 			      CONFIG_HAPTICS_LOG_LEVEL);                                           \
-	static const struct cs40l5x_config cs40l5x_config_##inst;                                  \
-	static struct cs40l5x_data cs40l5x_data_##inst;                                            \
 	static const struct cs40l5x_config cs40l5x_config_##inst = {                               \
 		HAPTICS_CS40L5X_CONFIG(inst, id)};                                                 \
 	static struct cs40l5x_data cs40l5x_data_##inst = {HAPTICS_CS40L5X_DATA(inst)};             \
