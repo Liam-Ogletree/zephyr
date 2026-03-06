@@ -12,6 +12,9 @@
 extern "C" {
 #endif /* __cplusplus */
 
+#define CS40L5X_REG_WIDTH  4
+#define CS40L5X_ADDR_WIDTH 4
+
 /**
  * @brief Calibration data for click compensation
  */
