@@ -9,11 +9,9 @@
  * @brief I2C Driver for Cirrus Logic CS40L5x Haptic Devices
  */
 
-#define DT_DRV_COMPAT cirrus_cs40l5x
-
 #include <zephyr/drivers/haptics/cs40l5x.h>
 
-#if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
+#if CONFIG_HAPTICS_CS40L5X_I2C
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
@@ -75,4 +73,4 @@ const struct cs40l5x_bus_io cs40l5x_bus_io_i2c = {
 	.read = cs40l5x_read_i2c,
 	.write = cs40l5x_write_i2c,
 };
-#endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c) */
+#endif /* CONFIG_HAPTICS_CS40L5X_I2C */

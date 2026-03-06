@@ -9,11 +9,9 @@
  * @brief SPI Driver for Cirrus Logic CS40L5x Haptic Devices
  */
 
-#define DT_DRV_COMPAT cirrus_cs40l5x
-
 #include <zephyr/drivers/haptics/cs40l5x.h>
 
-#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+#if CONFIG_HAPTICS_CS40L5X_SPI
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(CS40L5X_SPI, CONFIG_HAPTICS_LOG_LEVEL);
@@ -58,4 +56,4 @@ const struct cs40l5x_bus_io cs40l5x_bus_io_spi = {
 	.read = cs40l5x_read_spi,
 	.write = cs40l5x_write_spi,
 };
-#endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(spi) */
+#endif /* CONFIG_HAPTICS_CS40L5X_SPI */

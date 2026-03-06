@@ -265,6 +265,8 @@ struct cs40l5x_config {
 	struct cs40l5x_data *const data;
 	/**< Logger configuration for instance-based logging */
 	LOG_INSTANCE_PTR_DECLARE(log);
+	/**< Device ID corresponding to the part number */
+	const uint32_t dev_id;
 	/**< Control port devices */
 	const struct cs40l5x_bus bus;
 	/**< Control port I/O functions */
@@ -293,8 +295,6 @@ struct cs40l5x_data {
 	const struct cs40l5x_config *const config;
 	/**< Lock to deconflict haptic playback, device calibration, and configuration changes */
 	struct k_mutex lock;
-	/**< Device ID corresponding to the part number */
-	uint32_t dev_id;
 	/**< Revision ID corresponding to the silicon variant */
 	uint8_t rev_id;
 	/**< Callback handler for interrupt processing */
