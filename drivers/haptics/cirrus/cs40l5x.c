@@ -9,6 +9,7 @@
  * @brief Core Driver for Cirrus Logic CS40L5x Haptic Devices
  */
 
+#include "cs40l5x.h"
 #include <stdlib.h>
 #include <zephyr/arch/common/ffs.h>
 #include <zephyr/device.h>
