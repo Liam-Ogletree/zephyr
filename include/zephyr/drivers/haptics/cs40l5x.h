@@ -26,7 +26,7 @@ extern "C" {
  */
 
 /**
- * @brief Attenuation options for GPIO-triggered haptic effects
+ * @brief Attenuation options for triggered haptic effects
  * @details Provide to @ref cs40l5x_configure_trigger().
  */
 enum cs40l5x_attenuation {
@@ -119,12 +119,10 @@ enum cs40l5x_trigger_edge {
 /**
  * @brief Run calibration to derive ReDC and F0 values and apply results for click compensation
  *
- * @param dev Pointer to the device structure for haptic device instance
+ * @param[in] dev Pointer to the device structure for haptic device instance
  *
  * @retval 0 if success
- * @retval -EAGAIN if ReDC or F0 estimation times out
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_calibrate(const struct device *const dev);
 
@@ -134,14 +132,13 @@ int cs40l5x_calibrate(const struct device *const dev);
  * @details With large amplitudes and insufficient power (e.g., in the case of internal boost
  * configurations), it's possible to induce boost errors.
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param frequency Frequency of haptic effect in Hz (default: 0xF0)
- * @param level Amplitude of haptic effect, where UINT8_MAX is 100% (default: 0x1B)
- * @param duration Playback duration in milliseconds, where 0 is infinite duration (default: 0x32)
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] frequency Frequency of haptic effect in Hz (default: 0xF0)
+ * @param[in] level Amplitude of haptic effect, where UINT8_MAX is 100% (default: 0x1B)
+ * @param[in] duration Playback duration in milliseconds, where 0 is indefinite (default: 0x32)
  *
  * @retval 0 if success
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_configure_buzz(const struct device *const dev, const uint32_t frequency,
 			   const uint8_t level, const uint32_t duration);
@@ -149,17 +146,15 @@ int cs40l5x_configure_buzz(const struct device *const dev, const uint32_t freque
 /**
  * @brief Configure edge-triggered haptic effect
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param gpio Pointer to the device structure for the GPIO used as the trigger source
- * @param bank Wavetable source for desired haptic effect, see @ref cs40l5x_bank
- * @param index Wavetable index for desired haptic effect
- * @param attenuation Attenuation in dB for desired haptic effect, see @ref cs40l5x_attenuation
- * @param edge Specify edge (rising or falling) to trigger haptic effects
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] gpio Pointer to the device structure for the GPIO used as the trigger source
+ * @param[in] bank Wavetable source for desired haptic effect, see @ref cs40l5x_bank
+ * @param[in] index Wavetable index for desired haptic effect
+ * @param[in] attenuation Attenuation in dB for desired haptic effect, see @ref cs40l5x_attenuation
+ * @param[in] edge Specify edge (rising or falling) to trigger haptic effects
  *
  * @retval 0 if success
- * @retval -EINVAL if invalid wavetable source and index provided (e.g., index out of bounds)
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_dt_spec *const gpio,
 			      const enum cs40l5x_bank bank, const uint8_t index,
@@ -169,28 +164,25 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 /**
  * @brief Update runtime haptics logging and get current status
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param logger_state See @ref cs40l5x_logger
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] logger_state See @ref cs40l5x_logger
  *
  * @retval 1 if logging is enabled
  * @retval 0 if logging is disabled
- * @retval -EINVAL if invalid wavetable source or trigger GPIO provided
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_logger(const struct device *const dev, enum cs40l5x_logger logger_state);
 
 /**
  * @brief Get runtime haptics logging data for the specified logger source
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param source See @ref cs40l5x_logger_source
- * @param value Unsigned 32-bit integer to store the retrieved data
- * @param type See @ref cs40l5x_logger_source_type
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] source See @ref cs40l5x_logger_source
+ * @param[in] type See @ref cs40l5x_logger_source_type
+ * @param[out] value Unsigned 32-bit integer to store the retrieved data
  *
  * @retval 0 if success
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_logger_get(const struct device *const dev, enum cs40l5x_logger_source source,
 		       enum cs40l5x_logger_source_type type, uint32_t *const value);
@@ -198,12 +190,12 @@ int cs40l5x_logger_get(const struct device *const dev, enum cs40l5x_logger_sourc
 /**
  * @brief Select haptic effect triggered via @ref haptics_start_output()
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param bank Wavetable source for desired haptic effect, see @ref cs40l5x_bank
- * @param index Wavetable index for desired haptic effect
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] bank Wavetable source for desired haptic effect, see @ref cs40l5x_bank
+ * @param[in] index Wavetable index for desired haptic effect
  *
  * @retval 0 if success
- * @retval -EINVAL if invalid wavetable source and index provided (e.g., index out of bounds)
+ * @retval <0 if failed
  */
 int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_bank bank,
 			  const uint8_t index);
@@ -211,30 +203,26 @@ int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_ban
 /**
  * @brief Configure gain for haptic effects triggered via @ref haptics_start_output()
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param gain Gain setting (valid values between 0 and 100)
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] gain Gain setting (valid values between 0 and 100)
  *
  * @retval 0 if success
- * @retval -EINVAL if provided gain is greater than 100%
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain);
 
 /**
  * @brief Upload PCM effect to the specified index
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param index See @ref cs40l5x_custom_index
- * @param redc ReDC compensation in unsigned Q5.7 format | redc * (24 / 2.9)
- * @param f0 F0 compensation in unsigned Q9.3 format | (f0 - 50) * 8
- * @param samples Array of signed 8-bit PCM samples
- * @param num_samples Number of PCM samples
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] index See @ref cs40l5x_custom_index
+ * @param[in] redc ReDC compensation in unsigned Q5.7 format | redc * (24 / 2.9)
+ * @param[in] f0 F0 compensation in unsigned Q9.3 format | (f0 - 50) * 8
+ * @param[in] samples Array of signed 8-bit PCM samples
+ * @param[in] num_samples Number of PCM samples
  *
  * @retval 0 if success
- * @retval -EINVAL if invalid index provided (e.g., index out of bounds)
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom_index index,
 		       const uint16_t redc, const uint16_t f0, const int8_t *const samples,
@@ -243,15 +231,13 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 /**
  * @brief Upload PWLE effect to the specified index
  *
- * @param dev Pointer to the device structure for haptic device instance
- * @param index See @ref cs40l5x_custom_index
- * @param sections Array of @ref cs40l5x_pwle_section
- * @param num_sections Number of PWLE sections
+ * @param[in] dev Pointer to the device structure for haptic device instance
+ * @param[in] index See @ref cs40l5x_custom_index
+ * @param[in] sections Array of @ref cs40l5x_pwle_section
+ * @param[in] num_sections Number of PWLE sections
  *
  * @retval 0 if success
- * @retval -EINVAL if invalid index provided (e.g., index out of bounds)
- * @retval -EIO if a control port transaction fails
- * @retval -errno another error code on failure, resulting from PM action callback
+ * @retval <0 if failed
  */
 int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custom_index index,
 			const struct cs40l5x_pwle_section *const sections,
