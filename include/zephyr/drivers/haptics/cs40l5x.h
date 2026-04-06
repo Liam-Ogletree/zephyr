@@ -5,20 +5,14 @@
 
 /**
  * @file
- * @brief Header file providing the API for the CS40L5x haptic driver
- * @ingroup cs40l5x_interface
+ * @brief API for the CS40L5x haptic driver
+ * @ingroup haptics_interface_ext
  */
 
 #ifndef ZEPHYR_INCLUDE_DRIVERS_HAPTICS_CS40L5X_H_
 #define ZEPHYR_INCLUDE_DRIVERS_HAPTICS_CS40L5X_H_
 
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/spi.h>
-#include <zephyr/drivers/haptics.h>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log_instance.h>
-#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +21,7 @@ extern "C" {
 /**
  * @defgroup cs40l5x_interface CS40L5x
  * @ingroup haptics_interface_ext
- * @brief CS40L5x Haptic Driver
+ * @brief CS40L5x haptic driver
  * @{
  */
 

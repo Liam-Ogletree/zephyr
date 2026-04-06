@@ -1,116 +1,69 @@
 /*
- * Copyright (c) 2025, Cirrus Logic, Inc.
+ * Copyright (c) 2025 Cirrus Logic, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file
- * @brief Core Driver for Cirrus Logic CS40L5x Haptic Devices
+ * @brief Core driver for Cirrus Logic CS40L5x haptic drivers
  */
 
 #include "cs40l5x.h"
 #include <stdlib.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/flash.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/haptics/cs40l5x.h>
 #include <zephyr/drivers/regulator.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/pm/device.h>
 #include <zephyr/pm/device_runtime.h>
-#include <zephyr/storage/flash_map.h>
-#include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/util_macro.h>
-#include <zephyr/toolchain.h>
 
 LOG_MODULE_REGISTER(CS40L5X, CONFIG_HAPTICS_LOG_LEVEL);
 
-/* Supported devices */
-#define CS40L5X_DEVID_50  0x40A50U
-#define CS40L5X_DEVID_51  0x40A51U
-#define CS40L5X_DEVID_52  0x40A52U
-#define CS40L5X_DEVID_53  0x40A53U
-#define CS40L5X_REVID_B0  0xB0U
-#define CS40L5X_OTPID_MIN 0x1U
-#define CS40L5X_OTPID_MAX 0xEU
-
-/* Helper macros */
-#define CS40L5X_ANY_DEV_USE_HIBERNATION                                                            \
-	(IS_ENABLED(CONFIG_PM_DEVICE) && IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME))
-
 /* Register map */
-#define CS40L5X_REG_DEVID                       0x00000000U
-#define CS40L5X_REG_REVID                       (CS40L5X_REG_DEVID + 0x4)
-#define CS40L5X_REG_OTPID                       (CS40L5X_REG_REVID + 0xC)
-#define CS40L5X_REG_SFT_RESET                   0x00000020U
-#define CS40L5X_REG_IRQ1_STATUS                 0x0000E004U
-#define CS40L5X_REG_IRQ1_INT_1                  0x0000E010U
-#define CS40L5X_REG_IRQ1_INT_2                  (CS40L5X_REG_IRQ1_INT_1 + 0x4)
-#define CS40L5X_REG_IRQ1_INT_8                  (CS40L5X_REG_IRQ1_INT_2 + 0x18)
-#define CS40L5X_REG_IRQ1_INT_9                  (CS40L5X_REG_IRQ1_INT_8 + 0x4)
-#define CS40L5X_REG_IRQ1_INT_10                 (CS40L5X_REG_IRQ1_INT_9 + 0x4)
-#define CS40L5X_REG_IRQ1_INT_14                 0x0000E044U
-#define CS40L5X_REG_IRQ1_INT_18                 0x0000E054U
-#define CS40L5X_REG_IRQ1_MASK_1                 0x0000E090U
-#define CS40L5X_REG_IRQ1_MASK_2                 (CS40L5X_REG_IRQ1_MASK_1 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_3                 (CS40L5X_REG_IRQ1_MASK_2 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_4                 (CS40L5X_REG_IRQ1_MASK_3 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_5                 (CS40L5X_REG_IRQ1_MASK_4 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_6                 (CS40L5X_REG_IRQ1_MASK_5 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_7                 (CS40L5X_REG_IRQ1_MASK_6 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_8                 (CS40L5X_REG_IRQ1_MASK_7 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_14                0x0000E0C4U
-#define CS40L5X_REG_IRQ1_MASK_18                0x0000E0D4U
-#define CS40L5X_REG_IRQ1_MASK_19                (CS40L5X_REG_IRQ1_MASK_18 + 0x4)
-#define CS40L5X_REG_IRQ1_MASK_20                (CS40L5X_REG_IRQ1_MASK_19 + 0x4)
-#define CS40L5X_REG_DSP_MBOX_2                  0x00011004U
-#define CS40L5X_REG_DSP_MBOX_8                  (CS40L5X_REG_DSP_MBOX_2 + 0x18)
-#define CS40L5X_REG_DSP_VIRTUAL1_MBOX_1         0x00011020U
-#define CS40L5X_REG_HALO_STATE                  0x028021E0U
-#define CS40L5X_REG_BUZZ_FREQ                   0x028027A0U
-#define CS40L5X_REG_BUZZ_LEVEL                  (CS40L5X_REG_BUZZ_FREQ + 0x4)
-#define CS40L5X_REG_BUZZ_DURATION               (CS40L5X_REG_BUZZ_LEVEL + 0x4)
-#define CS40L5X_REG_BUZZ_RES                    (CS40L5X_REG_BUZZ_FREQ + 0x4C)
-#define CS40L5X_REG_DYNAMIC_F0                  0x0280285CU
-#define CS40L5X_REG_REDC                        0x02802F7CU
-#define CS40L5X_REG_F0_EST                      0x02802F84U
-#define CS40L5X_REG_SOURCE_ATTENUATION          0x028030B8U
-#define CS40L5X_REG_LOGGER_ENABLE               0x028033E8U
-#define CS40L5X_REG_LOGGER_DATA                 0x02803440U
-#define CS40L5X_REG_GPIO_EVENT_BASE             0x02803E00U
-#define CS40L5X_REG_STDBY_TIMEOUT               0x028042F8U
-#define CS40L5X_REG_ACTIVE_TIMEOUT              (CS40L5X_REG_STDBY_TIMEOUT + 0x8)
-#define CS40L5X_REG_MAILBOX_QUEUE_WT            0x028042C8U
-#define CS40L5X_REG_MAILBOX_QUEUE_RD            (CS40L5X_REG_MAILBOX_QUEUE_WT + 0x4)
-#define CS40L5X_REG_MAILBOX_STATUS              (CS40L5X_REG_MAILBOX_QUEUE_RD + 0x4)
-#define CS40L5X_REG_WSEQ_POWER                  0x02804348U
-#define CS40L5X_REG_VIBEGEN_F0_OTP_STORED       0x02805C00U
-#define CS40L5X_REG_VIBEGEN_REDC_OTP_STORED     (CS40L5X_REG_VIBEGEN_F0_OTP_STORED + 0x8)
-#define CS40L5X_REG_VIBEGEN_COMPENSATION_ENABLE (CS40L5X_REG_VIBEGEN_F0_OTP_STORED + 0x30)
-#define CS40L5X_REG_CUSTOM_HEADER1_0            0x02807770U
-#define CS40L5X_REG_CUSTOM_HEADER2_0            (CS40L5X_REG_CUSTOM_HEADER1_0 + 0xC)
-#define CS40L5X_REG_CUSTOM_DATA_0               (CS40L5X_REG_CUSTOM_HEADER1_0 + 0x14)
-#define CS40L5X_REG_CUSTOM_HEADER1_1            0x0280797CU
-#define CS40L5X_REG_CUSTOM_HEADER2_1            (CS40L5X_REG_CUSTOM_HEADER1_1 + 0xC)
-#define CS40L5X_REG_CUSTOM_DATA_1               (CS40L5X_REG_CUSTOM_HEADER1_1 + 0x14)
-#define CS40L5X_REG_CALIB_REDC_EST              0x03401110U
+#define CS40L5X_REG_DEVID               0x00000000U
+#define CS40L5X_REG_REVID               (CS40L5X_REG_DEVID + 0x4)
+#define CS40L5X_REG_OTPID               (CS40L5X_REG_REVID + 0xC)
+#define CS40L5X_REG_SFT_RESET           0x00000020U
+#define CS40L5X_REG_IRQ1_STATUS         0x0000E004U
+#define CS40L5X_REG_IRQ1_INT_1          0x0000E010U
+#define CS40L5X_REG_IRQ1_INT_2          (CS40L5X_REG_IRQ1_INT_1 + 0x4)
+#define CS40L5X_REG_IRQ1_INT_8          (CS40L5X_REG_IRQ1_INT_2 + 0x18)
+#define CS40L5X_REG_IRQ1_INT_9          (CS40L5X_REG_IRQ1_INT_8 + 0x4)
+#define CS40L5X_REG_IRQ1_INT_10         (CS40L5X_REG_IRQ1_INT_9 + 0x4)
+#define CS40L5X_REG_IRQ1_INT_14         0x0000E044U
+#define CS40L5X_REG_IRQ1_INT_18         0x0000E054U
+#define CS40L5X_REG_IRQ1_MASK_1         0x0000E090U
+#define CS40L5X_REG_IRQ1_MASK_2         (CS40L5X_REG_IRQ1_MASK_1 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_3         (CS40L5X_REG_IRQ1_MASK_2 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_4         (CS40L5X_REG_IRQ1_MASK_3 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_5         (CS40L5X_REG_IRQ1_MASK_4 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_6         (CS40L5X_REG_IRQ1_MASK_5 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_7         (CS40L5X_REG_IRQ1_MASK_6 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_8         (CS40L5X_REG_IRQ1_MASK_7 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_14        0x0000E0C4U
+#define CS40L5X_REG_IRQ1_MASK_18        0x0000E0D4U
+#define CS40L5X_REG_IRQ1_MASK_19        (CS40L5X_REG_IRQ1_MASK_18 + 0x4)
+#define CS40L5X_REG_IRQ1_MASK_20        (CS40L5X_REG_IRQ1_MASK_19 + 0x4)
+#define CS40L5X_REG_DSP_MBOX_2          0x00011004U
+#define CS40L5X_REG_DSP_MBOX_8          (CS40L5X_REG_DSP_MBOX_2 + 0x18)
+#define CS40L5X_REG_DSP_VIRTUAL1_MBOX_1 0x00011020U
 
 /* Masks */
 #define CS40L5X_MASK_AMP_SHORT_ERR_INT1        BIT(31)
-#define CS40L5X_MASK_TEMP_ERR_INT1             BIT(31)
-#define CS40L5X_MASK_BST_UVP_ERR_INT1          BIT(6)
-#define CS40L5X_MASK_BST_SHORT_ERR_INT1        BIT(7)
-#define CS40L5X_MASK_BST_ILIMIT_ERR_INT1       BIT(8)
-#define CS40L5X_MASK_UVLO_VDDBATT_ERR_INT1     BIT(16)
-#define CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT1 BIT(21)
-#define CS40L5X_MASK_INDEX                     GENMASK(7, 0)
-#define CS40L5X_MASK_BANK                      (GENMASK(27, 20) | BIT(7))
+#define CS40L5X_MASK_TEMP_ERR_INT8             BIT(31)
+#define CS40L5X_MASK_BST_UVP_ERR_INT9          BIT(6)
+#define CS40L5X_MASK_BST_SHORT_ERR_INT9        BIT(7)
+#define CS40L5X_MASK_BST_ILIMIT_ERR_INT9       BIT(8)
+#define CS40L5X_MASK_UVLO_VDDBATT_ERR_INT10    BIT(16)
+#define CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT2 BIT(21)
 #define CS40L5X_MASK_ATTENUATION               GENMASK(11, 9)
-#define CS40L5X_MASK_CUSTOM_PLAYBACK           BIT(16)
+#define CS40L5X_MASK_BUZ_BANK                  BIT(7)
+#define CS40L5X_MASK_CUSTOM_BANK               BIT(16)
 
 /* Outbound mailbox codes */
 #define CS40L5X_MBOX_PREVENT_HIBERNATION 0x02000003U
@@ -138,30 +91,26 @@ LOG_MODULE_REGISTER(CS40L5X, CONFIG_HAPTICS_LOG_LEVEL);
 #define CS40L5X_BUZ_BANK_CMD    0x01000080U
 
 /* Timing specifications */
-#define CS40L5X_T_DEFAULT_DELAY       K_MSEC(1)
-#define CS40L5X_T_RLPW                K_MSEC(1)
-#define CS40L5X_T_IRS                 K_MSEC(3)
-#define CS40L5X_T_DSP_READY           K_MSEC(10)
-#define CS40L5X_T_WAKESOURCE          K_MSEC(10)
-#define CS40L5X_T_MBOX_CLEAR          K_MSEC(10)
-#define CS40L5X_T_CALIBRATION_START   K_MSEC(1000)
-#define CS40L5X_T_REDC_EST_DONE       K_MSEC(30)
-#define CS40L5X_T_REDC_CALIBRATION    K_MSEC(1030)
-#define CS40L5X_T_F0_EST_DONE         K_MSEC(1500)
-#define CS40L5X_T_F0_CALIBRATION      K_MSEC(2500)
-#define CS40L5X_T_WAIT                K_MSEC(5000)
-#define CS40L5X_T_INTERRUPT_DEBOUNCER K_USEC(500)
+#define CS40L5X_T_RLPW              K_MSEC(1)
+#define CS40L5X_T_IRS               K_MSEC(3)
+#define CS40L5X_T_WAKESOURCE        K_MSEC(10)
+#define CS40L5X_T_MBOX_CLEAR        K_MSEC(10)
+#define CS40L5X_T_CALIBRATION_START K_MSEC(1000)
+#define CS40L5X_T_REDC_EST_DONE     K_MSEC(30)
+#define CS40L5X_T_REDC_CALIBRATION  K_MSEC(1030)
+#define CS40L5X_T_F0_EST_DONE       K_MSEC(1500)
+#define CS40L5X_T_F0_CALIBRATION    K_MSEC(2500)
+
+/* Kconfig options */
+#define CS40L5X_PM_ACTIVE_TIMEOUT CONFIG_HAPTICS_CS40L5X_PM_ACTIVE_TIMEOUT
+#define CS40L5X_PM_STDBY_TIMEOUT  CONFIG_HAPTICS_CS40L5X_PM_STDBY_TIMEOUT
 
 /* Miscellaneous helpers */
 #define CS40L5X_WRITE_SFT_RESET         0x5A000000U
-#define CS40L5X_WRITE_LOGGER_DISABLE    0x00000000U
-#define CS40L5X_WRITE_LOGGER_ENABLE     0x00000001U
 #define CS40L5X_WRITE_DYNAMIC_F0_ENABLE 0x00000001U
 #define CS40L5X_WRITE_F0_COMP_ENABLE    0x00000001U
 #define CS40L5X_WRITE_REDC_COMP_ENABLE  0x00000002U
 #define CS40L5X_WRITE_PAUSE_PLAYBACK    0x05000000U
-#define CS40L5X_WRITE_UNMASK            0x00000000U
-#define CS40L5X_WRITE_MASK              0xFFFFFFFFU
 #define CS40L5X_WRITE_PCM               0x00000008U
 #define CS40L5X_WRITE_PWLE              0x0000000CU
 #define CS40L5X_EXP_MBOX_CLEAR          0x00000000U
@@ -171,10 +120,6 @@ LOG_MODULE_REGISTER(CS40L5X, CONFIG_HAPTICS_LOG_LEVEL);
 #define CS40L5X_EXP_REDC_EST_DONE       0x07000022U
 #define CS40L5X_EXP_F0_EST_START        0x07000011U
 #define CS40L5X_EXP_F0_EST_DONE         0x07000021U
-#define CS40L5X_GPIO_LOGIC_LOW          0
-#define CS40L5X_GPIO_LOGIC_HIGH         1
-#define CS40L5X_GPIO_INACTIVE           CS40L5X_GPIO_LOGIC_LOW
-#define CS40L5X_GPIO_ACTIVE             CS40L5X_GPIO_LOGIC_HIGH
 #define CS40L5X_LOGGER_SOURCE_STEP      12
 #define CS40L5X_LOGGER_TYPE_STEP        4
 #define CS40L5X_MAX_GAIN                100
@@ -192,12 +137,6 @@ LOG_MODULE_REGISTER(CS40L5X, CONFIG_HAPTICS_LOG_LEVEL);
 #define CS40L5X_PWLE_DEFAULT_FREQ       0x0320U
 #define CS40L5X_PWLE_DEFAULT_FLAGS      0x1
 #define CS40L5X_PWLE_RESERVED_VALUE     0x003FFFFFU
-#define CS40L5X_FLASH_MEMORY_ERASED     0xFFFFFFFFU
-#define CS40L5X_NUM_IRQ1_INT            16
-
-#define CS40L5X_WRITE_BE32(...)                                                                    \
-	.buf = (uint32_t[]){FOR_EACH(sys_cpu_to_be32, (,), __VA_ARGS__)},                          \
-	.len = NUM_VA_ARGS(__VA_ARGS__)
 
 enum cs40l5x_irq {
 	CS40L5X_INT1,
@@ -216,197 +155,86 @@ enum cs40l5x_irq {
 	CS40L5X_INT20,
 	CS40L5X_INT21,
 	CS40L5X_INT22,
+	CS40L5X_NUM_INT,
 };
 
-struct cs40l5x_multi_write {
-	uint32_t addr;
-	uint32_t *buf;
-	size_t len;
+static const uint8_t cs40l5x_trigger_offsets[] = {
+	[CS40L5X_GPIO3] = 0x00,  [CS40L5X_GPIO4] = 0x08,  [CS40L5X_GPIO5] = 0x10,
+	[CS40L5X_GPIO6] = 0x18,  [CS40L5X_GPIO10] = 0x20, [CS40L5X_GPIO11] = 0x28,
+	[CS40L5X_GPIO12] = 0x30, [CS40L5X_GPIO13] = 0x38,
 };
 
-static const struct cs40l5x_multi_write cs40l5x_b0_internal_boost[] = {
-	{.addr = 0x00002018U, CS40L5X_WRITE_BE32(0x00003321U, 0x04000010U)},
+static const struct cirrus_multi_write cs40l5x_b0_internal_boost[] = {
+	{.addr = 0x00002018U, CIRRUS_MULTI_WRITE_BE32(0x00003321U, 0x04000010U)},
 };
 
-static const struct cs40l5x_multi_write cs40l5x_b0_external_boost[] = {
-	{.addr = 0x00002018U, CS40L5X_WRITE_BE32(0x00003201U)},
-	{.addr = 0x00004404U, CS40L5X_WRITE_BE32(0x01000000U)},
+static const struct cirrus_multi_write cs40l5x_b0_external_boost[] = {
+	{.addr = 0x00002018U, CIRRUS_MULTI_WRITE_BE32(0x00003201U)},
+	{.addr = 0x00004404U, CIRRUS_MULTI_WRITE_BE32(0x01000000U)},
 };
 
-static const struct cs40l5x_multi_write cs40l5x_b0_errata[] = {
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x00000055U)},
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x000000AAU)},
-	{.addr = 0x00003014U, CS40L5X_WRITE_BE32(0x08012E16U)},
-	{.addr = 0x00003808U, CS40L5X_WRITE_BE32(0xC0000004U)},
-	{.addr = 0x0000380CU, CS40L5X_WRITE_BE32(0xC8710230U)},
-	{.addr = 0x0000388CU, CS40L5X_WRITE_BE32(0x04E0FFFFU)},
-	{.addr = 0x0000649CU, CS40L5X_WRITE_BE32(0x01818461U)},
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x00000000U)},
+static const struct cirrus_multi_write cs40l5x_b0_errata[] = {
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x00000055U)},
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x000000AAU)},
+	{.addr = 0x00003014U, CIRRUS_MULTI_WRITE_BE32(0x08012E16U)},
+	{.addr = 0x00003808U, CIRRUS_MULTI_WRITE_BE32(0xC0000004U)},
+	{.addr = 0x0000380CU, CIRRUS_MULTI_WRITE_BE32(0xC8710230U)},
+	{.addr = 0x0000388CU, CIRRUS_MULTI_WRITE_BE32(0x04E0FFFFU)},
+	{.addr = 0x0000649CU, CIRRUS_MULTI_WRITE_BE32(0x01818461U)},
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x00000000U)},
 	{.addr = 0x02BC21B8U,
-	 CS40L5X_WRITE_BE32(0x00000302U, 0x00000001U, 0x00018B41U, 0x00009920U)},
+	 CIRRUS_MULTI_WRITE_BE32(0x00000302U, 0x00000001U, 0x00018B41U, 0x00009920U)},
 };
 
-static const struct cs40l5x_multi_write cs40l5x_b0_errata_external_boost[] = {
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x00000055U)},
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x000000AAU)},
-	{.addr = 0x00005C00U, CS40L5X_WRITE_BE32(0x00000400U)},
-	{.addr = 0x00004220U, CS40L5X_WRITE_BE32(0x8000007DU)},
-	{.addr = 0x00004200U, CS40L5X_WRITE_BE32(0x00000008U)},
-	{.addr = 0x00004240U, CS40L5X_WRITE_BE32(0x510002B5U)},
-	{.addr = 0x00006024U, CS40L5X_WRITE_BE32(0x00522303U)},
-	{.addr = 0x00000040U, CS40L5X_WRITE_BE32(0x00000000U)},
+static const struct cirrus_multi_write cs40l5x_b0_errata_external_boost[] = {
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x00000055U)},
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x000000AAU)},
+	{.addr = 0x00005C00U, CIRRUS_MULTI_WRITE_BE32(0x00000400U)},
+	{.addr = 0x00004220U, CIRRUS_MULTI_WRITE_BE32(0x8000007DU)},
+	{.addr = 0x00004200U, CIRRUS_MULTI_WRITE_BE32(0x00000008U)},
+	{.addr = 0x00004240U, CIRRUS_MULTI_WRITE_BE32(0x510002B5U)},
+	{.addr = 0x00006024U, CIRRUS_MULTI_WRITE_BE32(0x00522303U)},
+	{.addr = 0x00000040U, CIRRUS_MULTI_WRITE_BE32(0x00000000U)},
 	{.addr = 0x02804348U,
-	 CS40L5X_WRITE_BE32(0x00040020U, 0x00183201U, 0x00050044U, 0x00040100U, 0x00FD0001U,
-			    0x0004005CU, 0x00000400U, 0x00000000U, 0x00422080U, 0x0000007DU,
-			    0x00040042U, 0x00000008U, 0x00050042U, 0x00405100U, 0x00040060U,
-			    0x00242303U, 0x00FFFFFFU)}};
+	 CIRRUS_MULTI_WRITE_BE32(0x00040020U, 0x00183201U, 0x00050044U, 0x00040100U, 0x00FD0001U,
+				 0x0004005CU, 0x00000400U, 0x00000000U, 0x00422080U, 0x0000007DU,
+				 0x00040042U, 0x00000008U, 0x00050042U, 0x00405100U, 0x00040060U,
+				 0x00242303U, 0x00FFFFFFU)}};
 
-static const struct cs40l5x_multi_write cs40l5x_irq_clear[] = {
+static const struct cirrus_multi_write cs40l5x_irq_clear[] = {
 	{.addr = CS40L5X_REG_IRQ1_INT_1,
-	 CS40L5X_WRITE_BE32(0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
-			    0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU)},
-	{.addr = CS40L5X_REG_IRQ1_INT_14, CS40L5X_WRITE_BE32(0xFFFFFFFFU)},
+	 CIRRUS_MULTI_WRITE_BE32(0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+				 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU)},
+	{.addr = CS40L5X_REG_IRQ1_INT_14, CIRRUS_MULTI_WRITE_BE32(0xFFFFFFFFU)},
 	{.addr = CS40L5X_REG_IRQ1_INT_18,
-	 CS40L5X_WRITE_BE32(0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU)},
+	 CIRRUS_MULTI_WRITE_BE32(0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU)},
 };
 
-static const struct cs40l5x_multi_write cs40l5x_irq_masks[] = {
-	{.addr = CS40L5X_REG_IRQ1_MASK_1, CS40L5X_WRITE_BE32(0x03FFFFFFU, 0xFFDF7FFFU)},
-	{.addr = CS40L5X_REG_IRQ1_MASK_4, CS40L5X_WRITE_BE32(0xE0FFFFFFU)},
+static const struct cirrus_multi_write cs40l5x_irq_masks[] = {
+	{.addr = CS40L5X_REG_IRQ1_MASK_1, CIRRUS_MULTI_WRITE_BE32(0x03FFFFFFU, 0xFFDF7FFFU)},
+	{.addr = CS40L5X_REG_IRQ1_MASK_4, CIRRUS_MULTI_WRITE_BE32(0xE0FFFFFFU)},
 	{.addr = CS40L5X_REG_IRQ1_MASK_8,
-	 CS40L5X_WRITE_BE32(0x7C000FFFU, 0x0101C033U, 0x0000F00CU)},
-	{.addr = CS40L5X_REG_IRQ1_MASK_20, CS40L5X_WRITE_BE32(0x15FFF000U)},
+	 CIRRUS_MULTI_WRITE_BE32(0x7C000FFFU, 0x0101C033U, 0x0000F00CU)},
+	{.addr = CS40L5X_REG_IRQ1_MASK_20, CIRRUS_MULTI_WRITE_BE32(0x15FFF000U)},
 };
 
-static const struct cs40l5x_multi_write cs40l5x_pseq[] = {
-	{.addr = CS40L5X_REG_WSEQ_POWER,
-	 CS40L5X_WRITE_BE32(
-		 0x00000000U, 0x00E09003U, 0x00FFFFFFU, 0x000304FFU, 0x00DF7FFFU, 0x00000000U,
-		 0x00E09CE0U, 0x00FFFFFFU, 0x00000000U, 0x00E0AC7CU, 0x00000FFFU, 0x00030401U,
-		 0x0001C033U, 0x00030400U, 0x0000F00CU, 0x00000000U, 0x00E0DC15U, 0x00FFF000U,
-		 0x00000000U, 0x00004000U, 0x00000055U, 0x00030000U, 0x000000AAU, 0x00000000U,
-		 0x00301408U, 0x00012E16U, 0x00000000U, 0x003808C0U, 0x00000004U, 0x000304C8U,
-		 0x00710230U, 0x00038004U, 0x00E0FFFFU, 0x00000000U, 0x00649C01U, 0x00818461U,
-		 0x00000000U, 0x00004000U, 0x00000000U, CS40L5X_WSEQ_TERMINATOR)},
-};
+static const uint32_t cs40l5x_pseq[] = {CIRRUS_WRITE_BE32(
+	0x00000000U, 0x00E09003U, 0x00FFFFFFU, 0x000304FFU, 0x00DF7FFFU, 0x00000000U, 0x00E09CE0U,
+	0x00FFFFFFU, 0x00000000U, 0x00E0AC7CU, 0x00000FFFU, 0x00030401U, 0x0001C033U, 0x00030400U,
+	0x0000F00CU, 0x00000000U, 0x00E0DC15U, 0x00FFF000U, 0x00000000U, 0x00004000U, 0x00000055U,
+	0x00030000U, 0x000000AAU, 0x00000000U, 0x00301408U, 0x00012E16U, 0x00000000U, 0x003808C0U,
+	0x00000004U, 0x000304C8U, 0x00710230U, 0x00038004U, 0x00E0FFFFU, 0x00000000U, 0x00649C01U,
+	0x00818461U, 0x00000000U, 0x00004000U, 0x00000000U, CS40L5X_WSEQ_TERMINATOR)};
 
-static const struct cs40l5x_multi_write cs40l5x_pseq_internal[] = {
-	{.addr = CS40L5X_REG_WSEQ_POWER + (cs40l5x_pseq[0].len - 1) * CS40L5X_REG_WIDTH,
-	 CS40L5X_WRITE_BE32(0x00000000U, 0x00201800U, 0x00003321U, 0x00030404U, 0x00000010U,
-			    CS40L5X_WSEQ_TERMINATOR)},
-};
+static const uint32_t cs40l5x_pseq_internal[] = {CIRRUS_WRITE_BE32(
+	0x00000000U, 0x00201800U, 0x00003321U, 0x00030404U, 0x00000010U, CS40L5X_WSEQ_TERMINATOR)};
 
-static const struct cs40l5x_multi_write cs40l5x_pseq_external[] = {
-	{.addr = CS40L5X_REG_WSEQ_POWER + (cs40l5x_pseq[0].len - 1) * CS40L5X_REG_WIDTH,
-	 CS40L5X_WRITE_BE32(0x00000000U, 0x00201800U, 0x00003201U, 0x00000000U, 0x00440401U,
-			    0x00000000U, 0x00000000U, 0x00004000U, 0x00000055U, 0x00030000U,
-			    0x000000AAU, 0x00000000U, 0x005C0000U, 0x00000400U, 0x00000000U,
-			    0x00420000U, 0x00000008U, 0x00032080U, 0x0000007DU, 0x00032051U,
-			    0x000002B5U, 0x00000000U, 0x00602400U, 0x00522303U, 0x00000000U,
-			    0x00004000U, 0x00000000U, CS40L5X_WSEQ_TERMINATOR)},
-};
-
-/* Source attenuation in decibels (dB) stored in signed Q21.2 format */
-static const uint8_t cs40l5x_src_atten[] = {
-	0xFF, /* mute */
-	0xA0, 0x88, 0x7A, 0x70, 0x68, 0x62, 0x5C, 0x58, 0x54, 0x50, 0x4D, 0x4A, 0x47,
-	0x44, 0x42, 0x40, 0x3E, 0x3C, 0x3A, 0x38, 0x36, 0x35, 0x33, 0x32, 0x30, /* 25% */
-	0x2F, 0x2D, 0x2C, 0x2B, 0x2A, 0x29, 0x28, 0x27, 0x25, 0x24, 0x23, 0x23, 0x22,
-	0x21, 0x20, 0x1F, 0x1E, 0x1D, 0x1D, 0x1C, 0x1B, 0x1A, 0x1A, 0x19, 0x18, /* 50% */
-	0x17, 0x17, 0x16, 0x15, 0x15, 0x14, 0x14, 0x13, 0x12, 0x12, 0x11, 0x11, 0x10,
-	0x10, 0x0F, 0x0E, 0x0E, 0x0D, 0x0D, 0x0C, 0x0C, 0x0B, 0x0B, 0x0A, 0x0A, /* 75% */
-	0x0A, 0x09, 0x09, 0x08, 0x08, 0x07, 0x07, 0x06, 0x06, 0x06, 0x05, 0x05, 0x04,
-	0x04, 0x04, 0x03, 0x03, 0x03, 0x02, 0x02, 0x01, 0x01, 0x01, 0x00, 0x00 /* 100% */
-};
-
-static bool cs40l5x_is_ready(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->is_ready(dev);
-}
-
-static const struct device *const cs40l5x_get_control_port(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->get_device(dev);
-}
-
-static int cs40l5x_read(const struct device *const dev, const uint32_t addr, uint32_t *const rx)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->read(dev, addr, rx, 1);
-}
-
-static int cs40l5x_burst_read(const struct device *const dev, const uint32_t addr,
-			      uint32_t *const rx, const uint32_t len)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->read(dev, addr, rx, len);
-}
-
-static int cs40l5x_write(const struct device *const dev, const uint32_t addr, uint32_t val)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->write(dev, addr, &val, 1);
-}
-
-static int cs40l5x_burst_write(const struct device *const dev, const uint32_t addr,
-			       uint32_t *const tx, const uint32_t len)
-{
-	const struct cs40l5x_config *const config = dev->config;
-
-	return config->bus_io->write(dev, addr, tx, len);
-}
-
-static int cs40l5x_multi_write(const struct device *const dev,
-			       const struct cs40l5x_multi_write *const multi_write,
-			       const uint32_t len)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	int ret;
-
-	for (int i = 0; i < len; i++) {
-		ret = config->bus_io->raw_write(dev, multi_write[i].addr, multi_write[i].buf,
-						multi_write[i].len);
-		if (ret < 0) {
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
-static int cs40l5x_poll(const struct device *const dev, const uint32_t addr, const uint32_t val,
-			const k_timeout_t timeout)
-{
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	const k_timepoint_t end = sys_timepoint_calc(timeout);
-	uint32_t reg_val;
-	int ret;
-
-	do {
-		ret = cs40l5x_read(dev, addr, &reg_val);
-		if (ret < 0) {
-			return ret;
-		}
-
-		if (reg_val == val) {
-			return 0;
-		}
-
-		(void)k_sleep(CS40L5X_T_DEFAULT_DELAY);
-	} while (!sys_timepoint_expired(end));
-
-	LOG_INST_DBG(config->log, "timed out polling 0x%08x, expected 0x%08x but received 0x%08x",
-		     addr, val, reg_val);
-
-	return -EBUSY;
-}
+static const uint32_t cs40l5x_pseq_external[] = {CIRRUS_WRITE_BE32(
+	0x00000000U, 0x00201800U, 0x00003201U, 0x00000000U, 0x00440401U, 0x00000000U, 0x00000000U,
+	0x00004000U, 0x00000055U, 0x00030000U, 0x000000AAU, 0x00000000U, 0x005C0000U, 0x00000400U,
+	0x00000000U, 0x00420000U, 0x00000008U, 0x00032080U, 0x0000007DU, 0x00032051U, 0x000002B5U,
+	0x00000000U, 0x00602400U, 0x00522303U, 0x00000000U, 0x00004000U, 0x00000000U,
+	CS40L5X_WSEQ_TERMINATOR)};
 
 static inline bool cs40l5x_valid_wavetable_source(const struct device *const dev,
 						  const enum cs40l5x_bank bank, const uint8_t index)
@@ -431,33 +259,33 @@ static inline bool cs40l5x_valid_wavetable_source(const struct device *const dev
 static int cs40l5x_write_mailbox(const struct device *const dev, const uint32_t mailbox_command)
 {
 	const k_timepoint_t end = sys_timepoint_calc(CS40L5X_T_WAKESOURCE);
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	int ret;
 
 	do {
-		ret = cs40l5x_write(dev, CS40L5X_REG_DSP_VIRTUAL1_MBOX_1, mailbox_command);
+		ret = cirrus_write(dev, CS40L5X_REG_DSP_VIRTUAL1_MBOX_1, mailbox_command);
 		if (ret >= 0) {
-			return cs40l5x_poll(dev, CS40L5X_REG_DSP_VIRTUAL1_MBOX_1,
-					    CS40L5X_EXP_MBOX_CLEAR, CS40L5X_T_MBOX_CLEAR);
+			return cirrus_poll(dev, CS40L5X_REG_DSP_VIRTUAL1_MBOX_1,
+					   CS40L5X_EXP_MBOX_CLEAR, CS40L5X_T_MBOX_CLEAR);
 		}
 
-		(void)k_sleep(CS40L5X_T_DEFAULT_DELAY);
+		(void)k_sleep(CIRRUS_T_POLLING);
 	} while (!sys_timepoint_expired(end));
 
-	LOG_INST_DBG(config->log, "failed write to mailbox (%d)", ret);
+	LOG_INST_DBG(config->log, "timed out writing to mailbox (%d)", ret);
 
-	return 0;
+	return -ETIMEDOUT;
 }
 
 static int cs40l5x_increment_mailbox(const struct device *const dev, uint32_t *const mbox_ptr)
 {
 	if (*mbox_ptr < CS40L5X_REG_DSP_MBOX_8) {
-		*mbox_ptr += CS40L5X_REG_WIDTH;
+		*mbox_ptr += CIRRUS_REGISTER_WIDTH;
 	} else {
 		*mbox_ptr = CS40L5X_REG_DSP_MBOX_2;
 	}
 
-	return cs40l5x_write(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, *mbox_ptr);
+	return cirrus_firmware_write(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, *mbox_ptr);
 }
 
 static int cs40l5x_poll_mailbox(const struct device *const dev, const uint32_t mailbox_command,
@@ -466,12 +294,12 @@ static int cs40l5x_poll_mailbox(const struct device *const dev, const uint32_t m
 	uint32_t mbox_rd_ptr;
 	int ret;
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, &mbox_rd_ptr);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, &mbox_rd_ptr);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_poll(dev, mbox_rd_ptr, mailbox_command, timeout);
+	ret = cirrus_poll(dev, mbox_rd_ptr, mailbox_command, timeout);
 	if (ret < 0) {
 		return ret;
 	}
@@ -484,85 +312,32 @@ static int cs40l5x_reset_mailbox(const struct device *const dev)
 	uint32_t mbox_ptr;
 	int ret;
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_MAILBOX_QUEUE_WT, &mbox_ptr);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_MAILBOX_QUEUE_WT, &mbox_ptr);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return cs40l5x_write(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, mbox_ptr);
-}
-
-static int cs40l5x_get_trigger_gpio(const struct device *const dev,
-				    const struct gpio_dt_spec *const gpio, uint8_t *const index)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-
-	if (gpio == NULL) {
-		return -EINVAL;
-	}
-
-	for (*index = 0; *index < gpios->num_gpio; (*index)++) {
-		if ((gpio->pin == gpios->gpio[*index].pin) &&
-		    (strcmp(gpio->port->name, gpios->gpio[*index].port->name) == 0)) {
-			break;
-		}
-	}
-
-	if (*index == gpios->num_gpio) {
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int cs40l5x_trigger_config(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-	int ret;
-
-	for (int i = 0; i < gpios->num_gpio; i++) {
-		ret = gpio_pin_configure_dt(&gpios->gpio[i], GPIO_OUTPUT);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "skipped %s (%d)", gpios->gpio[i].port->name,
-				     ret);
-			continue;
-		}
-
-		gpios->ready[i] = true;
-	}
-
-	return 0;
-}
-
-static void cs40l5x_error_callback(const struct device *const dev, const uint32_t error_bitmask)
-{
-	struct cs40l5x_data *const data = dev->data;
-
-	if (data->error_callback != NULL) {
-		data->error_callback(dev, error_bitmask, data->user_data);
-	}
+	return cirrus_firmware_write(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, mbox_ptr);
 }
 
 static int cs40l5x_process_mailbox(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	uint32_t mbox_rd_ptr, mbox_status, mbox_val, mbox_wr_ptr;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_MAILBOX_STATUS, &mbox_status);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_MAILBOX_STATUS, &mbox_status);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, &mbox_rd_ptr);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_MAILBOX_QUEUE_RD, &mbox_rd_ptr);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_MAILBOX_QUEUE_WT, &mbox_wr_ptr);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_MAILBOX_QUEUE_WT, &mbox_wr_ptr);
 	if (ret < 0) {
 		return ret;
 	}
@@ -572,7 +347,7 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 	}
 
 	do {
-		ret = cs40l5x_read(dev, mbox_rd_ptr, &mbox_val);
+		ret = cirrus_read(dev, mbox_rd_ptr, &mbox_val);
 		if (ret < 0) {
 			return ret;
 		}
@@ -594,13 +369,13 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 			LOG_INST_DBG(config->log, "awake after reset");
 			break;
 		case CS40L5X_MBOX_AWAKE:
-			LOG_INST_DBG(config->log, "awake after hibernation");
+			LOG_INST_DBG(config->log, "awake");
 			break;
 		case CS40L5X_MBOX_REDC_EST_START:
 			LOG_INST_DBG(config->log, "ReDC calibration started");
 			break;
 		case CS40L5X_MBOX_REDC_EST_DONE:
-			LOG_INST_DBG(config->log, "ReDC calibration started");
+			LOG_INST_DBG(config->log, "ReDC calibration complete");
 			k_sem_give(&data->calibration_semaphore);
 			break;
 		case CS40L5X_MBOX_F0_EST_START:
@@ -613,7 +388,7 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 		case CS40L5X_MBOX_PERMANENT_SHORT_DETECTED:
 			__fallthrough;
 		case CS40L5X_MBOX_RUNTIME_SHORT_DETECTED:
-			cs40l5x_error_callback(dev, HAPTICS_ERROR_OVERCURRENT);
+			cirrus_error_callback(dev, HAPTICS_ERROR_OVERCURRENT);
 
 			return 0;
 		default:
@@ -627,13 +402,13 @@ static int cs40l5x_process_mailbox(const struct device *const dev)
 		}
 	} while (mbox_rd_ptr != mbox_wr_ptr);
 
-	return cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_2, CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT1);
+	return cirrus_write(dev, CS40L5X_REG_IRQ1_INT_2, CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT2);
 }
 
 static int cs40l5x_process_interrupts(const struct device *const dev,
 				      const uint32_t *const irq_ints)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	uint32_t error_bitmask = 0;
 	int ret;
 
@@ -642,68 +417,68 @@ static int cs40l5x_process_interrupts(const struct device *const dev,
 
 		error_bitmask |= HAPTICS_ERROR_OVERCURRENT;
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_1, CS40L5X_MASK_AMP_SHORT_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_1, CS40L5X_MASK_AMP_SHORT_ERR_INT1);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	if (FIELD_GET(CS40L5X_MASK_TEMP_ERR_INT1, irq_ints[CS40L5X_INT8]) != 0) {
+	if (FIELD_GET(CS40L5X_MASK_TEMP_ERR_INT8, irq_ints[CS40L5X_INT8]) != 0) {
 		LOG_INST_WRN(config->log, "overtemperature detected");
 
 		error_bitmask |= HAPTICS_ERROR_OVERTEMPERATURE;
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_8, CS40L5X_MASK_TEMP_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_8, CS40L5X_MASK_TEMP_ERR_INT8);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	if (FIELD_GET(CS40L5X_MASK_BST_UVP_ERR_INT1, irq_ints[CS40L5X_INT9]) != 0) {
+	if (FIELD_GET(CS40L5X_MASK_BST_UVP_ERR_INT9, irq_ints[CS40L5X_INT9]) != 0) {
 		LOG_INST_WRN(config->log, "undervoltage detected");
 
 		error_bitmask |= HAPTICS_ERROR_UNDERVOLTAGE;
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_UVP_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_UVP_ERR_INT9);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	if (FIELD_GET(CS40L5X_MASK_BST_SHORT_ERR_INT1, irq_ints[CS40L5X_INT9]) != 0) {
+	if (FIELD_GET(CS40L5X_MASK_BST_SHORT_ERR_INT9, irq_ints[CS40L5X_INT9]) != 0) {
 		LOG_INST_WRN(config->log, "inductor short detected");
 
 		error_bitmask |= HAPTICS_ERROR_OVERCURRENT;
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_SHORT_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_SHORT_ERR_INT9);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	if (FIELD_GET(CS40L5X_MASK_BST_ILIMIT_ERR_INT1, irq_ints[CS40L5X_INT9]) != 0) {
+	if (FIELD_GET(CS40L5X_MASK_BST_ILIMIT_ERR_INT9, irq_ints[CS40L5X_INT9]) != 0) {
 		LOG_INST_WRN(config->log, "current limited");
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_ILIMIT_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_9, CS40L5X_MASK_BST_ILIMIT_ERR_INT9);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	if (FIELD_GET(CS40L5X_MASK_UVLO_VDDBATT_ERR_INT1, irq_ints[CS40L5X_INT10]) != 0) {
+	if (FIELD_GET(CS40L5X_MASK_UVLO_VDDBATT_ERR_INT10, irq_ints[CS40L5X_INT10]) != 0) {
 		LOG_INST_WRN(config->log, "battery undervoltage detected");
 
 		error_bitmask |= HAPTICS_ERROR_UNDERVOLTAGE;
 
-		ret = cs40l5x_write(dev, CS40L5X_REG_IRQ1_INT_10,
-				    CS40L5X_MASK_UVLO_VDDBATT_ERR_INT1);
+		ret = cirrus_write(dev, CS40L5X_REG_IRQ1_INT_10,
+				   CS40L5X_MASK_UVLO_VDDBATT_ERR_INT10);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
 	if (error_bitmask != 0) {
-		cs40l5x_error_callback(dev, error_bitmask);
+		cirrus_error_callback(dev, error_bitmask);
 	}
 
 	return 0;
@@ -712,65 +487,65 @@ static int cs40l5x_process_interrupts(const struct device *const dev,
 static int cs40l5x_retrieve_interrupt_statuses(const struct device *const dev,
 					       uint32_t *const irq_ints)
 {
-	uint32_t irq_masks[CS40L5X_NUM_IRQ1_INT];
+	uint32_t irq_masks[CS40L5X_NUM_INT];
 	int ret;
 
-	ret = cs40l5x_burst_read(dev, CS40L5X_REG_IRQ1_INT_1, irq_ints, 10);
+	ret = cirrus_burst_read(dev, CS40L5X_REG_IRQ1_INT_1, irq_ints, 10);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_IRQ1_INT_14, &irq_ints[CS40L5X_INT14]);
+	ret = cirrus_read(dev, CS40L5X_REG_IRQ1_INT_14, &irq_ints[CS40L5X_INT14]);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_burst_read(dev, CS40L5X_REG_IRQ1_INT_18, &irq_ints[CS40L5X_INT18], 5);
+	ret = cirrus_burst_read(dev, CS40L5X_REG_IRQ1_INT_18, &irq_ints[CS40L5X_INT18], 5);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_burst_read(dev, CS40L5X_REG_IRQ1_MASK_1, irq_masks, 10);
+	ret = cirrus_burst_read(dev, CS40L5X_REG_IRQ1_MASK_1, irq_masks, 10);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_IRQ1_MASK_14, &irq_masks[CS40L5X_INT14]);
+	ret = cirrus_read(dev, CS40L5X_REG_IRQ1_MASK_14, &irq_masks[CS40L5X_INT14]);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_burst_read(dev, CS40L5X_REG_IRQ1_MASK_18, &irq_masks[CS40L5X_INT18], 5);
+	ret = cirrus_burst_read(dev, CS40L5X_REG_IRQ1_MASK_18, &irq_masks[CS40L5X_INT18], 5);
 	if (ret < 0) {
 		return ret;
 	}
 
-	for (int i = 0; i < CS40L5X_NUM_IRQ1_INT; i++) {
+	for (int i = 0; i < CS40L5X_NUM_INT; i++) {
 		irq_ints[i] &= ~irq_masks[i];
 	}
 
-	return ret;
+	return 0;
 }
 
 static void cs40l5x_interrupt_worker(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
-	struct cs40l5x_data *data = CONTAINER_OF(dwork, struct cs40l5x_data, interrupt_worker);
+	struct cirrus_data *data = CONTAINER_OF(dwork, struct cirrus_data, interrupt_worker);
 	const struct device *const dev = data->dev;
-	const struct cs40l5x_config *const config = dev->config;
-	uint32_t irq1_status, irq_ints[CS40L5X_NUM_IRQ1_INT];
+	const struct cirrus_config *const config = dev->config;
+	uint32_t irq1_status, irq_ints[CS40L5X_NUM_INT];
 	int ret;
 
-	if (gpio_pin_get_dt(&config->interrupt_gpio) == CS40L5X_GPIO_INACTIVE) {
+	if (gpio_pin_get_dt(&config->interrupt_gpio) == CIRRUS_GPIO_INACTIVE) {
 		return;
 	}
 
-	ret = pm_device_runtime_get(data->dev);
+	ret = pm_device_runtime_get(dev);
 	if (ret < 0) {
 		return;
 	}
 
-	ret = cs40l5x_read(data->dev, CS40L5X_REG_IRQ1_STATUS, &irq1_status);
+	ret = cirrus_read(dev, CS40L5X_REG_IRQ1_STATUS, &irq1_status);
 	if (ret < 0) {
 		goto exit_pm;
 	}
@@ -780,26 +555,27 @@ static void cs40l5x_interrupt_worker(struct k_work *work)
 		goto exit_pm;
 	}
 
-	ret = cs40l5x_retrieve_interrupt_statuses(data->dev, irq_ints);
+	ret = cs40l5x_retrieve_interrupt_statuses(dev, irq_ints);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "failed to read IRQ registers (%d)", ret);
 		goto exit_pm;
 	}
 
-	ret = cs40l5x_process_interrupts(data->dev, irq_ints);
+	ret = cs40l5x_process_interrupts(dev, irq_ints);
 	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to process non-mailbox interrupts (%d)", ret);
 		goto exit_pm;
 	}
 
-	if (irq_ints[CS40L5X_INT2] & CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT1) {
-		ret = cs40l5x_process_mailbox(data->dev);
+	if (FIELD_GET(CS40L5X_MASK_DSP_VIRTUAL2_MBOX_WR_INT2, irq_ints[CS40L5X_INT2]) != 0) {
+		ret = cs40l5x_process_mailbox(dev);
 		if (ret < 0) {
 			LOG_INST_DBG(config->log, "failed to process mailbox (%d)", ret);
 			goto exit_pm;
 		}
 	}
 
-	ret = cs40l5x_read(data->dev, CS40L5X_REG_IRQ1_STATUS, &irq1_status);
+	ret = cirrus_read(dev, CS40L5X_REG_IRQ1_STATUS, &irq1_status);
 	if (ret < 0) {
 		goto exit_pm;
 	}
@@ -814,202 +590,96 @@ static void cs40l5x_interrupt_worker(struct k_work *work)
 	}
 
 exit_pm:
-	(void)pm_device_runtime_put(data->dev);
-}
-
-static void cs40l5x_interrupt_handler(const struct device *port, struct gpio_callback *cb,
-				      uint32_t pins)
-{
-	struct cs40l5x_data *const data = CONTAINER_OF(cb, struct cs40l5x_data, interrupt_callback);
-	const struct device *const dev = data->dev;
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	int ret;
-
-	ret = k_work_schedule(&data->interrupt_worker, CS40L5X_T_INTERRUPT_DEBOUNCER);
-	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed to queue interrupt worker (%d)", ret);
-	}
-}
-
-static int cs40l5x_irq_config(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	int ret;
-
-	ret = gpio_pin_configure_dt(&config->interrupt_gpio, GPIO_INPUT);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = gpio_pin_interrupt_configure_dt(&config->interrupt_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = cs40l5x_multi_write(dev, cs40l5x_irq_masks, ARRAY_SIZE(cs40l5x_irq_masks));
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = cs40l5x_multi_write(dev, cs40l5x_irq_clear, ARRAY_SIZE(cs40l5x_irq_clear));
-	if (ret < 0) {
-		return ret;
-	}
-
-	gpio_init_callback(&data->interrupt_callback, cs40l5x_interrupt_handler,
-			   BIT(config->interrupt_gpio.pin));
-
-	return gpio_add_callback_dt(&config->interrupt_gpio, &data->interrupt_callback);
+	(void)pm_device_runtime_put(dev);
 }
 
 static int cs40l5x_click_compensation(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_data *const data = dev->data;
-	int32_t enable = 0;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
+	const struct cirrus_data *const data = dev->data;
+	int ret;
 
-	if (data->calibration.f0 == 0 && data->calibration.redc == 0) {
-		LOG_INST_WRN(config->log, "no calibration data provided (%d)", -EINVAL);
+	if (!IS_ENABLED(CONFIG_HAPTICS_CIRRUS_CLICK_COMPENSATION)) {
 		return 0;
 	}
 
-	if (cs40l5x_write(dev, CS40L5X_REG_VIBEGEN_F0_OTP_STORED, data->calibration.f0) >= 0) {
-		enable |= CS40L5X_WRITE_F0_COMP_ENABLE;
+	if (data->calibration.f0 == 0 && data->calibration.redc == 0) {
+		LOG_INST_WRN(config->log, "no calibration data provided");
+		return 0;
 	}
 
-	if (cs40l5x_write(dev, CS40L5X_REG_VIBEGEN_REDC_OTP_STORED, data->calibration.redc) >= 0) {
-		enable |= CS40L5X_WRITE_REDC_COMP_ENABLE;
-	}
-
-	return cs40l5x_write(dev, CS40L5X_REG_VIBEGEN_COMPENSATION_ENABLE, enable);
-}
-
-static inline bool cs40l5x_is_memory_erased(const struct cs40l5x_calibration *const calibration)
-{
-	return (calibration->f0 == CS40L5X_FLASH_MEMORY_ERASED &&
-		calibration->redc == CS40L5X_FLASH_MEMORY_ERASED);
-}
-
-static int cs40l5x_load_calibration(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	struct cs40l5x_calibration calibration = {};
-	int ret;
-
-	ret = pm_device_runtime_get(config->flash);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_VIBEGEN_F0_OTP_STORED, data->calibration.f0);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = flash_read(config->flash, config->flash_offset, &calibration, sizeof(calibration));
-	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed read from flash storage (%d)", ret);
-	} else if (cs40l5x_is_memory_erased(&calibration)) {
-		LOG_INST_WRN(config->log, "calibration data not found (%d)", -EINVAL);
-	} else {
-		data->calibration = calibration;
-	}
-
-	(void)pm_device_runtime_put(config->flash);
-
-	return ret;
-}
-
-static int cs40l5x_store_calibration(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	struct cs40l5x_calibration calibration = {};
-	int ret;
-
-	ret = pm_device_runtime_get(config->flash);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_VIBEGEN_REDC_OTP_STORED,
+				    data->calibration.redc);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = flash_read(config->flash, config->flash_offset, &calibration, sizeof(calibration));
-	if (ret < 0) {
-		goto exit_pm;
-	}
-
-	if (!cs40l5x_is_memory_erased(&calibration)) {
-		LOG_INST_WRN(config->log, "skipping flash write, would overwrite data");
-		goto exit_pm;
-	}
-
-	ret = flash_write(config->flash, config->flash_offset, &data->calibration,
-			  sizeof(data->calibration));
-
-exit_pm:
-	(void)pm_device_runtime_put(config->flash);
-
-	return ret;
+	return cirrus_firmware_write(dev, CS40L5X_REG_VIBEGEN_COMPENSATION_ENABLE,
+				     CS40L5X_WRITE_F0_COMP_ENABLE | CS40L5X_WRITE_REDC_COMP_ENABLE);
 }
 
-static int cs40l5x_pseq_config(const struct device *const dev)
+static int cs40l5x_dynamic_f0(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
-	int ret;
-
-	ret = cs40l5x_multi_write(dev, cs40l5x_pseq, ARRAY_SIZE(cs40l5x_pseq));
-	if (ret < 0) {
-		return ret;
+	if (!IS_ENABLED(CONFIG_HAPTICS_CIRRUS_DYNAMIC_F0)) {
+		return 0;
 	}
 
-	return (config->external_boost != NULL)
-		       ? cs40l5x_multi_write(dev, cs40l5x_pseq_external,
-					     ARRAY_SIZE(cs40l5x_pseq_external))
-		       : cs40l5x_multi_write(dev, cs40l5x_pseq_internal,
-					     ARRAY_SIZE(cs40l5x_pseq_internal));
+	return cirrus_firmware_write(dev, CS40L5X_REG_DYNAMIC_F0, CS40L5X_WRITE_DYNAMIC_F0_ENABLE);
 }
 
 static int cs40l5x_dsp_config(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_FLASH) && config->flash != NULL) {
-		ret = cs40l5x_load_calibration(dev);
-		if (ret < 0) {
-			return ret;
-		}
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_CLICK_COMPENSATION)) {
-		ret = cs40l5x_click_compensation(dev);
-		if (ret < 0) {
-			return ret;
-		}
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_DYNAMIC_F0)) {
-		return cs40l5x_write(dev, CS40L5X_REG_DYNAMIC_F0, CS40L5X_WRITE_DYNAMIC_F0_ENABLE);
-	}
-
-	return 0;
-}
-
-static int cs40l5x_timeout_config(const struct device *const dev)
-{
-	uint32_t active_timeout[2], standby_timeout[2];
-	int ret;
-
-	active_timeout[0] = FIELD_GET(GENMASK(23, 0), CONFIG_HAPTICS_CS40L5X_PM_ACTIVE_TIMEOUT_MS);
-	active_timeout[1] = FIELD_GET(GENMASK(31, 24), CONFIG_HAPTICS_CS40L5X_PM_ACTIVE_TIMEOUT_MS);
-
-	standby_timeout[0] = FIELD_GET(GENMASK(23, 0), CONFIG_HAPTICS_CS40L5X_PM_STDBY_TIMEOUT_MS);
-	standby_timeout[1] = FIELD_GET(GENMASK(31, 24), CONFIG_HAPTICS_CS40L5X_PM_STDBY_TIMEOUT_MS);
-
-	ret = cs40l5x_burst_write(dev, CS40L5X_REG_ACTIVE_TIMEOUT, active_timeout,
-				  ARRAY_SIZE(active_timeout));
+	ret = cirrus_load_calibration(dev);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return cs40l5x_burst_write(dev, CS40L5X_REG_STDBY_TIMEOUT, standby_timeout,
-				   ARRAY_SIZE(standby_timeout));
+	ret = cs40l5x_click_compensation(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return cs40l5x_dynamic_f0(dev);
+}
+
+static int cs40l5x_pseq_config(const struct device *const dev)
+{
+	const off_t offset = (ARRAY_SIZE(cs40l5x_pseq) - 1) * CIRRUS_REGISTER_WIDTH;
+	const struct cs40l5x_config *const config = dev->config;
+	int ret;
+
+	ret = cirrus_firmware_raw_burst_write(dev, CS40L5X_REG_WSEQ_POWER, cs40l5x_pseq,
+					      ARRAY_SIZE(cs40l5x_pseq));
+	if (ret < 0) {
+		return ret;
+	}
+
+	return (HAPTICS_CS40L5X_EXTERNAL_BOOST(config))
+		       ? cirrus_firmware_raw_burst_write_offset(
+				 dev, CS40L5X_REG_WSEQ_POWER, cs40l5x_pseq_external,
+				 ARRAY_SIZE(cs40l5x_pseq_external), offset)
+		       : cirrus_firmware_raw_burst_write_offset(
+				 dev, CS40L5X_REG_WSEQ_POWER, cs40l5x_pseq_internal,
+				 ARRAY_SIZE(cs40l5x_pseq_internal), offset);
+}
+
+static int cs40l5x_timeout_config(const struct device *const dev)
+{
+	int ret;
+
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_ACTIVE_TIMEOUT, CS40L5X_PM_ACTIVE_TIMEOUT);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return cirrus_firmware_write(dev, CS40L5X_REG_STDBY_TIMEOUT, CS40L5X_PM_STDBY_TIMEOUT);
 }
 
 static int cs40l5x_write_errata(const struct device *const dev)
@@ -1017,14 +687,14 @@ static int cs40l5x_write_errata(const struct device *const dev)
 	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
-	ret = cs40l5x_multi_write(dev, cs40l5x_b0_errata, ARRAY_SIZE(cs40l5x_b0_errata));
+	ret = cirrus_raw_multi_write(dev, cs40l5x_b0_errata, ARRAY_SIZE(cs40l5x_b0_errata));
 	if (ret < 0) {
 		return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_EXTERNAL_BOOST) && config->external_boost != NULL) {
-		return cs40l5x_multi_write(dev, cs40l5x_b0_errata_external_boost,
-					   ARRAY_SIZE(cs40l5x_b0_errata_external_boost));
+	if (HAPTICS_CS40L5X_EXTERNAL_BOOST(config)) {
+		return cirrus_raw_multi_write(dev, cs40l5x_b0_errata_external_boost,
+					      ARRAY_SIZE(cs40l5x_b0_errata_external_boost));
 	}
 
 	return 0;
@@ -1033,48 +703,38 @@ static int cs40l5x_write_errata(const struct device *const dev)
 static int cs40l5x_boost_configuration(const struct device *const dev)
 {
 	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	struct cirrus_data *const data = dev->data;
 
-	if (data->rev_id != CS40L5X_REVID_B0) {
+	if (data->revision_id != CS40L5X_REVID_B0) {
 		return -ENOTSUP;
 	}
 
-	return (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERNAL_BOOST) ||
-		config->external_boost != NULL)
-		       ? cs40l5x_multi_write(dev, cs40l5x_b0_external_boost,
-					     ARRAY_SIZE(cs40l5x_b0_external_boost))
-		       : cs40l5x_multi_write(dev, cs40l5x_b0_internal_boost,
-					     ARRAY_SIZE(cs40l5x_b0_internal_boost));
+	return (HAPTICS_CS40L5X_EXTERNAL_BOOST(config))
+		       ? cirrus_raw_multi_write(dev, cs40l5x_b0_external_boost,
+						ARRAY_SIZE(cs40l5x_b0_external_boost))
+		       : cirrus_raw_multi_write(dev, cs40l5x_b0_internal_boost,
+						ARRAY_SIZE(cs40l5x_b0_internal_boost));
 }
 
 static int cs40l5x_fingerprint(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	uint32_t otpid, rx[2];
 	int ret;
 
-	ret = cs40l5x_burst_read(dev, CS40L5X_REG_DEVID, rx, ARRAY_SIZE(rx));
+	ret = cirrus_burst_read(dev, CS40L5X_REG_DEVID, rx, ARRAY_SIZE(rx));
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_OTPID, &otpid);
+	ret = cirrus_read(dev, CS40L5X_REG_OTPID, &otpid);
 	if (ret < 0) {
 		return ret;
 	}
 
-	switch (rx[0]) {
-	case CS40L5X_DEVID_50:
-		__fallthrough;
-	case CS40L5X_DEVID_51:
-		__fallthrough;
-	case CS40L5X_DEVID_52:
-		__fallthrough;
-	case CS40L5X_DEVID_53:
-		break;
-	default:
-		LOG_INST_ERR(config->log, "unsupported device: 0x%05X", rx[0]);
+	if (rx[0] != config->device_id) {
+		LOG_INST_ERR(config->log, "mismatched device ID: 0x%05X", rx[0]);
 		return -ENOTSUP;
 	}
 
@@ -1083,35 +743,48 @@ static int cs40l5x_fingerprint(const struct device *const dev)
 		return -ENOTSUP;
 	}
 
+	data->revision_id = (uint8_t)rx[1];
+
 	if (!IN_RANGE(otpid, CS40L5X_OTPID_MIN, CS40L5X_OTPID_MAX)) {
 		LOG_INST_ERR(config->log, "unsupported OTP: 0x%01X", otpid);
 		return -ENOTSUP;
 	}
 
-	data->rev_id = FIELD_GET(GENMASK(7, 0), rx[1]);
+	data->otp_id = (uint8_t)otpid;
 
 	LOG_INST_INF(config->log, "Cirrus Logic CS40L%02X Revision %X (OTP %01X)",
-		     (uint8_t)FIELD_GET(GENMASK(7, 0), config->dev_id), data->rev_id, otpid);
+		     (uint8_t)config->device_id, data->revision_id, data->otp_id);
 
 	return 0;
 }
 
 static int cs40l5x_reset(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	const struct cirrus_config *const config = dev->config;
+	uint32_t halo_state;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		ret = gpio_pin_set_dt(&config->reset_gpio, CS40L5X_GPIO_ACTIVE);
+	if (HAPTICS_CIRRUS_RESET(config)) {
+		ret = gpio_pin_set_dt(&config->reset_gpio, CIRRUS_GPIO_ACTIVE);
 		if (ret < 0) {
 			return ret;
 		}
 
 		(void)k_sleep(CS40L5X_T_RLPW);
 
-		ret = gpio_pin_set_dt(&config->reset_gpio, CS40L5X_GPIO_INACTIVE);
+		ret = gpio_pin_set_dt(&config->reset_gpio, CIRRUS_GPIO_INACTIVE);
 	} else {
-		ret = cs40l5x_write(dev, CS40L5X_REG_SFT_RESET, CS40L5X_WRITE_SFT_RESET);
+		ret = cirrus_wakeup(dev, CS40L5X_T_WAKESOURCE);
+		if (ret < 0) {
+			return ret;
+		}
+
+		ret = cs40l5x_write_mailbox(dev, CS40L5X_MBOX_PREVENT_HIBERNATION);
+		if (ret < 0) {
+			return ret;
+		}
+
+		ret = cirrus_write(dev, CS40L5X_REG_SFT_RESET, CS40L5X_WRITE_SFT_RESET);
 	}
 	if (ret < 0) {
 		return ret;
@@ -1124,11 +797,14 @@ static int cs40l5x_reset(const struct device *const dev)
 		return ret;
 	}
 
-	ret = cs40l5x_poll(dev, CS40L5X_REG_HALO_STATE, CS40L5X_EXP_DSP_STANDBY,
-			   CS40L5X_T_DSP_READY);
+	ret = cirrus_firmware_read(dev, CS40L5X_REG_HALO_STATE, &halo_state);
 	if (ret < 0) {
-		LOG_INST_DBG(config->log, "expected standby after hardware reset (%d)", ret);
 		return ret;
+	}
+
+	if (halo_state != CS40L5X_EXP_DSP_STANDBY) {
+		LOG_INST_DBG(config->log, "expected DSP in standby after hardware reset (%d)", ret);
+		return -ENODEV;
 	}
 
 	return cs40l5x_reset_mailbox(dev);
@@ -1136,25 +812,8 @@ static int cs40l5x_reset(const struct device *const dev)
 
 static int cs40l5x_bringup(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	const struct cirrus_config *const config = dev->config;
 	int ret;
-
-	/*
-	 * Prevent the device from entering hibernation, or wake up the device if hibernating.
-	 * There is no subsequent call to allow hibernation because the runtime PM framework
-	 * will handle it if enabled.
-	 */
-	ret = cs40l5x_write_mailbox(dev, CS40L5X_MBOX_PREVENT_HIBERNATION);
-	if (ret < 0) {
-		return ret;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT);
-		if (ret < 0) {
-			return ret;
-		}
-	}
 
 	ret = cs40l5x_reset(dev);
 	if (ret < 0) {
@@ -1162,12 +821,22 @@ static int cs40l5x_bringup(const struct device *const dev)
 		return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		ret = cs40l5x_irq_config(dev);
+	if (HAPTICS_CIRRUS_INTERRUPT(config)) {
+		ret = cirrus_raw_multi_write(dev, cs40l5x_irq_masks, ARRAY_SIZE(cs40l5x_irq_masks));
 		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed IRQ configuration (%d)", ret);
 			return ret;
 		}
+
+		ret = cirrus_raw_multi_write(dev, cs40l5x_irq_clear, ARRAY_SIZE(cs40l5x_irq_clear));
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	ret = cirrus_interrupt_config(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed IRQ configuration (%d)", ret);
+		return ret;
 	}
 
 	ret = cs40l5x_boost_configuration(dev);
@@ -1180,7 +849,7 @@ static int cs40l5x_bringup(const struct device *const dev)
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "failed errata update (%d)", ret);
 		return ret;
-	};
+	}
 
 	ret = cs40l5x_dsp_config(dev);
 	if (ret < 0) {
@@ -1188,13 +857,13 @@ static int cs40l5x_bringup(const struct device *const dev)
 		return ret;
 	}
 
-	if (CS40L5X_ANY_DEV_USE_HIBERNATION) {
-		ret = cs40l5x_timeout_config(dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to update timeouts (%d)", ret);
-			return ret;
-		}
+	ret = cs40l5x_timeout_config(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to update timeouts (%d)", ret);
+		return ret;
+	}
 
+	if (HAPTICS_CIRRUS_HIBERNATION) {
 		ret = cs40l5x_pseq_config(dev);
 		if (ret < 0) {
 			LOG_INST_DBG(config->log, "failed write sequencer update (%d)", ret);
@@ -1202,66 +871,38 @@ static int cs40l5x_bringup(const struct device *const dev)
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER) && config->trigger_gpios.num_gpio > 0) {
-		ret = cs40l5x_trigger_config(dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed trigger configuration (%d)", ret);
-			return ret;
-		}
-	}
-
-	return cs40l5x_write(dev, CS40L5X_REG_BUZZ_RES, CS40L5X_BUZ_1MS_RES);
-}
-
-#if CONFIG_PM_DEVICE
-static int cs40l5x_disable_irq(const struct device *const dev)
-{
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	int ret;
-
-	ret = gpio_pin_interrupt_configure_dt(&config->interrupt_gpio, GPIO_INT_DISABLE);
+	ret = cirrus_trigger_config(dev);
 	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed trigger configuration (%d)", ret);
 		return ret;
 	}
 
-	return gpio_remove_callback_dt(&config->interrupt_gpio, &data->interrupt_callback);
+	return cirrus_firmware_write(dev, CS40L5X_REG_BUZZ_RES, CS40L5X_BUZ_1MS_RES);
 }
 
+#if CONFIG_PM_DEVICE
 static int cs40l5x_teardown(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		ret = cs40l5x_disable_irq(dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to disable IRQ (%d)", ret);
-		}
+	ret = cirrus_interrupt_teardown(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to disable IRQ (%d)", ret);
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		ret = gpio_pin_set_dt(&config->reset_gpio, CS40L5X_GPIO_ACTIVE);
-		if (ret < 0) {
-			return ret;
-		}
-
-		if (gpio_pin_configure_dt(&config->reset_gpio, GPIO_DISCONNECTED) < 0) {
-			/*
-			 * If unable to disconnect the reset GPIO, configure as input to prevent the
-			 * device from being erroneously powered on.
-			 */
-			(void)gpio_pin_configure_dt(&config->reset_gpio, GPIO_INPUT);
-		}
+	ret = cirrus_reset_teardown(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to teardown reset GPIO (%d)", ret);
 	}
 
 	return 0;
 }
 #endif /* CONFIG_PM_DEVICE */
 
-static int cs40l5x_calibrate_redc(const struct device *const dev, uint32_t *const redc)
+static int cs40l5x_calibrate_redc(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1270,7 +911,7 @@ static int cs40l5x_calibrate_redc(const struct device *const dev, uint32_t *cons
 		return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
+	if (HAPTICS_CIRRUS_INTERRUPT(config)) {
 		ret = k_sem_take(&data->calibration_semaphore, CS40L5X_T_REDC_CALIBRATION);
 	} else {
 		ret = cs40l5x_poll_mailbox(dev, CS40L5X_MBOX_REDC_EST_START,
@@ -1288,12 +929,13 @@ static int cs40l5x_calibrate_redc(const struct device *const dev, uint32_t *cons
 		return ret;
 	}
 
-	return cs40l5x_read(dev, CS40L5X_REG_CALIB_REDC_EST, redc);
+	return cirrus_firmware_read(dev, CS40L5X_REG_CALIB_REDC_EST,
+				    &data->common.calibration.redc);
 }
 
-static int cs40l5x_calibrate_f0(const struct device *const dev, uint32_t *const f0)
+static int cs40l5x_calibrate_f0(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1302,7 +944,7 @@ static int cs40l5x_calibrate_f0(const struct device *const dev, uint32_t *const 
 		return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
+	if (HAPTICS_CIRRUS_INTERRUPT(config)) {
 		ret = k_sem_take(&data->calibration_semaphore, CS40L5X_T_F0_CALIBRATION);
 	} else {
 		ret = cs40l5x_poll_mailbox(dev, CS40L5X_MBOX_F0_EST_START,
@@ -1319,36 +961,35 @@ static int cs40l5x_calibrate_f0(const struct device *const dev, uint32_t *const 
 		return ret;
 	}
 
-	return cs40l5x_read(dev, CS40L5X_REG_F0_EST, f0);
+	return cirrus_firmware_read(dev, CS40L5X_REG_F0_EST, &data->common.calibration.f0);
 }
 
-static int cs40l5x_run_calibration(const struct device *const dev, uint32_t *const redc,
-				   uint32_t *const f0)
+static int cs40l5x_run_calibration(const struct device *const dev)
 {
+	struct cirrus_data *const data = dev->data;
 	int ret;
 
-	ret = cs40l5x_calibrate_redc(dev, redc);
+	ret = cs40l5x_calibrate_redc(dev);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_REDC, *redc);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_REDC, data->calibration.redc);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return cs40l5x_calibrate_f0(dev, f0);
+	return cs40l5x_calibrate_f0(dev);
 }
 
 int cs40l5x_calibrate(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
-	uint32_t f0, redc;
+	const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	int ret;
 
-	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_CALIBRATION)) {
-		LOG_INST_ERR(config->log, "calibration is disabled (%d)", -EPERM);
+	if (!IS_ENABLED(CONFIG_HAPTICS_CIRRUS_CALIBRATION)) {
+		LOG_INST_DBG(config->log, "calibration is disabled");
 		return -EPERM;
 	}
 
@@ -1357,42 +998,33 @@ int cs40l5x_calibrate(const struct device *const dev)
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	if (config->interrupt_gpio.port == NULL) {
+	if (!HAPTICS_CIRRUS_INTERRUPT(config)) {
 		ret = cs40l5x_reset_mailbox(dev);
 		if (ret < 0) {
 			goto error_mutex;
 		}
 	}
 
-	ret = cs40l5x_run_calibration(dev, &redc, &f0);
+	ret = cs40l5x_run_calibration(dev);
 	if (ret < 0) {
 		goto error_mutex;
 	}
 
-	data->calibration.f0 = f0;
-	data->calibration.redc = redc;
-
-	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_CLICK_COMPENSATION)) {
-		LOG_INST_WRN(config->log, "skipping click compensation");
-	} else {
-		ret = cs40l5x_click_compensation(data->dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to update click compensation (%d)", ret);
-			goto error_mutex;
-		}
+	ret = cs40l5x_click_compensation(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to update click compensation (%d)", ret);
+		goto error_mutex;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_FLASH) && config->flash != NULL) {
-		ret = cs40l5x_store_calibration(dev);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to store calibration (%d)", ret);
-		}
+	ret = cirrus_store_calibration(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to store calibration (%d)", ret);
 	}
 
 error_mutex:
@@ -1407,8 +1039,8 @@ error_pm:
 int cs40l5x_configure_buzz(const struct device *const dev, const uint32_t frequency,
 			   const uint8_t level, const uint32_t duration)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	int ret;
 
 	ret = pm_device_runtime_get(dev);
@@ -1416,23 +1048,23 @@ int cs40l5x_configure_buzz(const struct device *const dev, const uint32_t freque
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_BUZZ_FREQ, frequency);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_BUZZ_FREQ, frequency);
 	if (ret < 0) {
 		goto error_mutex;
 	}
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_BUZZ_LEVEL, level);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_BUZZ_LEVEL, level);
 	if (ret < 0) {
 		goto error_mutex;
 	}
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_BUZZ_DURATION, duration);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_BUZZ_DURATION, duration);
 
 error_mutex:
 	(void)k_mutex_unlock(&data->lock);
@@ -1448,16 +1080,15 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 			      const enum cs40l5x_attenuation attenuation,
 			      const enum cs40l5x_trigger_edge edge)
 {
-	const struct cs40l5x_config *const config = dev->config;
-	const struct cs40l5x_trigger_gpios *const gpios = &config->trigger_gpios;
-	struct cs40l5x_data *const data = dev->data;
-	uint8_t *address, i;
+	const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
+	uint8_t idx, offset;
 	uint32_t playback;
 	int ret;
 
-	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER) || gpios->num_gpio == 0) {
-		LOG_INST_DBG(config->log, "no trigger GPIOs provided (%d)", -EINVAL);
-		return -EINVAL;
+	if (!HAPTICS_CIRRUS_TRIGGER(config)) {
+		LOG_INST_DBG(config->log, "no trigger GPIOs provided");
+		return -EPERM;
 	}
 
 	if (!cs40l5x_valid_wavetable_source(dev, bank, index)) {
@@ -1465,22 +1096,26 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 		return -EINVAL;
 	}
 
-	ret = cs40l5x_get_trigger_gpio(dev, gpio, &i);
+	ret = cirrus_get_trigger(dev, gpio, &idx);
 	if (ret < 0) {
-		LOG_INST_ERR(config->log, "failed to retrieve trigger GPIO (%d)", ret);
+		LOG_INST_DBG(config->log, "failed to retrieve trigger GPIO (%d)", ret);
 		return ret;
 	}
+
+	offset = cs40l5x_trigger_offsets[idx] + ((edge == CS40L5X_FALLING_EDGE) ? 4 : 0);
 
 	playback = FIELD_PREP(CS40L5X_MASK_ATTENUATION, abs(attenuation)) | index;
 
 	switch (bank) {
 	case CS40L5X_ROM_BANK:
 		break;
+	case CS40L5X_BUZ_BANK:
+		playback |= CS40L5X_MASK_BUZ_BANK;
+		break;
 	case CS40L5X_CUSTOM_BANK:
-		playback |= CS40L5X_MASK_CUSTOM_PLAYBACK;
+		playback |= CS40L5X_MASK_CUSTOM_BANK;
 		break;
 	default:
-		LOG_INST_ERR(config->log, "invalid source for trigger effects (%d)", -EINVAL);
 		return -EINVAL;
 	}
 
@@ -1489,15 +1124,13 @@ int cs40l5x_configure_trigger(const struct device *const dev, const struct gpio_
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	address = (edge == CS40L5X_RISING_EDGE) ? gpios->rising_edge : gpios->falling_edge;
-
-	ret = cs40l5x_write(dev, CS40L5X_REG_GPIO_EVENT_BASE | (uint32_t)address[i], playback);
+	ret = cirrus_firmware_write_offset(dev, CS40L5X_REG_GPIO_EVENT_BASE, playback, offset);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -1509,12 +1142,12 @@ error_pm:
 
 int cs40l5x_logger(const struct device *const dev, enum cs40l5x_logger logger_state)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	int ret;
 
 	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_DSP_LOGGER)) {
-		LOG_INST_ERR(config->log, "haptics logging is disabled (%d)", -EPERM);
+		LOG_INST_DBG(config->log, "haptics logging is disabled");
 		return -EPERM;
 	}
 
@@ -1523,13 +1156,13 @@ int cs40l5x_logger(const struct device *const dev, enum cs40l5x_logger logger_st
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	ret = cs40l5x_write(dev, CS40L5X_REG_LOGGER_ENABLE, (uint32_t)logger_state);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_LOGGER_ENABLE, (uint32_t)logger_state);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -1542,12 +1175,12 @@ error_pm:
 int cs40l5x_logger_get(const struct device *const dev, enum cs40l5x_logger_source source,
 		       enum cs40l5x_logger_source_type type, uint32_t *const value)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	int offset, ret;
 
 	if (!IS_ENABLED(CONFIG_HAPTICS_CS40L5X_DSP_LOGGER)) {
-		LOG_INST_ERR(config->log, "haptics logging is disabled (%d)", -EPERM);
+		LOG_INST_DBG(config->log, "haptics logging is disabled");
 		return -EPERM;
 	}
 
@@ -1558,13 +1191,13 @@ int cs40l5x_logger_get(const struct device *const dev, enum cs40l5x_logger_sourc
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	ret = cs40l5x_read(dev, CS40L5X_REG_LOGGER_DATA + offset, value);
+	ret = cirrus_firmware_read_offset(dev, CS40L5X_REG_LOGGER_DATA, value, offset);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -1574,21 +1207,10 @@ error_pm:
 	return ret;
 }
 
-static int cs40l5x_register_error_callback(const struct device *dev, haptics_error_callback_t cb,
-					   void *const user_data)
-{
-	struct cs40l5x_data *const data = dev->data;
-
-	data->error_callback = cb;
-	data->user_data = user_data;
-
-	return 0;
-}
-
 int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_bank bank,
 			  const uint8_t index)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	uint32_t output;
 	int ret;
@@ -1614,7 +1236,7 @@ int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_ban
 		return -EINVAL;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->common.lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		return ret;
@@ -1622,20 +1244,20 @@ int cs40l5x_select_output(const struct device *const dev, const enum cs40l5x_ban
 
 	data->output = output;
 
-	(void)k_mutex_unlock(&data->lock);
+	(void)k_mutex_unlock(&data->common.lock);
 
 	return ret;
 }
 
 int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
-	struct cs40l5x_data *const data = dev->data;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
 	uint32_t attenuation;
 	int ret;
 
 	if (gain > CS40L5X_MAX_GAIN) {
-		LOG_INST_ERR(config->log, "invalid gain provided (%d)", -EINVAL);
+		LOG_INST_ERR(config->log, "invalid gain, %u >= %u", gain, CS40L5X_MAX_GAIN);
 		return -EINVAL;
 	}
 
@@ -1644,15 +1266,19 @@ int cs40l5x_set_gain(const struct device *const dev, const uint8_t gain)
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
 	}
 
-	attenuation = (gain == 0) ? CS40L5X_MAX_ATTENUATION : (uint32_t)cs40l5x_src_atten[gain];
+	if (gain == 0) {
+		attenuation = CS40L5X_MAX_ATTENUATION;
+	} else {
+		attenuation = (uint32_t)cirrus_source_attenuation[gain];
+	}
 
-	ret = cs40l5x_write(data->dev, CS40L5X_REG_SOURCE_ATTENUATION, attenuation);
+	ret = cirrus_firmware_write(dev, CS40L5X_REG_SOURCE_ATTENUATION, attenuation);
 
 	(void)k_mutex_unlock(&data->lock);
 
@@ -1664,7 +1290,7 @@ error_pm:
 
 static int cs40l5x_start_output(const struct device *const dev)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1673,7 +1299,7 @@ static int cs40l5x_start_output(const struct device *const dev)
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->common.lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
@@ -1681,7 +1307,7 @@ static int cs40l5x_start_output(const struct device *const dev)
 
 	ret = cs40l5x_write_mailbox(dev, data->output);
 
-	(void)k_mutex_unlock(&data->lock);
+	(void)k_mutex_unlock(&data->common.lock);
 
 error_pm:
 	(void)pm_device_runtime_put(dev);
@@ -1691,7 +1317,6 @@ error_pm:
 
 static int cs40l5x_stop_output(const struct device *const dev)
 {
-	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
 	ret = pm_device_runtime_get(dev);
@@ -1699,7 +1324,7 @@ static int cs40l5x_stop_output(const struct device *const dev)
 		return ret;
 	}
 
-	ret = cs40l5x_write_mailbox(data->dev, CS40L5X_WRITE_PAUSE_PLAYBACK);
+	ret = cs40l5x_write_mailbox(dev, CS40L5X_WRITE_PAUSE_PLAYBACK);
 
 	(void)pm_device_runtime_put(dev);
 
@@ -1730,21 +1355,21 @@ static int cs40l5x_upload_pcm_header(const struct device *const dev,
 	header[0] = FIELD_PREP(GENMASK(21, 0), num_samples);
 	header[1] = FIELD_PREP(GENMASK(23, 12), f0) | FIELD_PREP(GENMASK(11, 0), redc);
 
-	ret = cs40l5x_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_1), CS40L5X_WRITE_PCM);
+	ret = cirrus_firmware_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_1),
+				    CS40L5X_WRITE_PCM);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return cs40l5x_burst_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_2), header,
-				   ARRAY_SIZE(header));
+	return cirrus_firmware_burst_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_2),
+					   header, ARRAY_SIZE(header));
 }
 
 static int cs40l5x_upload_pcm_data(const struct device *const dev,
 				   const enum cs40l5x_custom_index index,
 				   const int8_t *const samples, const uint16_t num_samples)
 {
-	uint32_t addr, offset, sample;
-	uint8_t current_word = 0;
+	uint32_t addr, offset = 0, sample;
 	uint16_t i = 0;
 	int ret;
 
@@ -1764,13 +1389,12 @@ static int cs40l5x_upload_pcm_data(const struct device *const dev,
 			i += 1;
 		}
 
-		offset = current_word * CS40L5X_REG_WIDTH;
-		current_word += 1;
-
-		ret = cs40l5x_write(dev, addr + offset, sample);
+		ret = cirrus_firmware_write_offset(dev, addr, sample, offset);
 		if (ret < 0) {
 			return ret;
 		}
+
+		offset += CIRRUS_REGISTER_WIDTH;
 	}
 
 	return 0;
@@ -1780,7 +1404,7 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 		       const uint16_t redc, const uint16_t f0, const int8_t *const samples,
 		       const uint16_t num_samples)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1799,7 +1423,7 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->common.lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
@@ -1818,7 +1442,7 @@ int cs40l5x_upload_pcm(const struct device *const dev, const enum cs40l5x_custom
 	data->custom_effects[index] = true;
 
 error_mutex:
-	(void)k_mutex_unlock(&data->lock);
+	(void)k_mutex_unlock(&data->common.lock);
 
 error_pm:
 	(void)pm_device_runtime_put(dev);
@@ -1842,14 +1466,14 @@ static int cs40l5x_upload_pwle_header(const struct device *const dev,
 		    FIELD_PREP(GENMASK(15, 4), CS40L5X_PWLE_DEFAULT_FREQ) |
 		    FIELD_PREP(GENMASK(3, 0), CS40L5X_PWLE_DEFAULT_FLAGS);
 
-	ret = cs40l5x_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_1),
-			    CS40L5X_WRITE_PWLE);
+	ret = cirrus_firmware_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_1),
+				    CS40L5X_WRITE_PWLE);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return cs40l5x_burst_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_2), header,
-				   ARRAY_SIZE(header));
+	return cirrus_firmware_burst_write(dev, cs40l5x_custom_header(index, CS40L5X_HEADER_2),
+					   header, ARRAY_SIZE(header));
 }
 
 static int cs40l5x_upload_pwle_data(const struct device *const dev,
@@ -1857,33 +1481,32 @@ static int cs40l5x_upload_pwle_data(const struct device *const dev,
 				    const struct cs40l5x_pwle_section *const sections,
 				    const uint8_t num_sections)
 {
-	uint32_t addr, offset, word;
-	uint8_t current_word = 0;
+	uint32_t addr, offset = 4 * CIRRUS_REGISTER_WIDTH, word;
 	int ret;
 
-	addr = cs40l5x_custom_header(index, CS40L5X_HEADER_2) + 4 * CS40L5X_REG_WIDTH;
+	addr = cs40l5x_custom_header(index, CS40L5X_HEADER_2);
 
 	for (int i = 1; i < num_sections; i++) {
 		word = FIELD_PREP(GENMASK(19, 4), sections[i].duration) |
 		       FIELD_PREP(GENMASK(3, 0), FIELD_GET(GENMASK(11, 8), sections[i].level));
 
-		offset = (current_word++ * CS40L5X_REG_WIDTH);
-
-		ret = cs40l5x_write(dev, addr + offset, word);
+		ret = cirrus_firmware_write_offset(dev, addr, word, offset);
 		if (ret < 0) {
 			return ret;
 		}
+
+		offset += CIRRUS_REGISTER_WIDTH;
 
 		word = FIELD_PREP(GENMASK(23, 16), FIELD_GET(GENMASK(7, 0), sections[i].level)) |
 		       FIELD_PREP(GENMASK(15, 4), sections[i].frequency) |
 		       FIELD_PREP(GENMASK(3, 0), sections[i].flags);
 
-		offset = (current_word++ * CS40L5X_REG_WIDTH);
-
-		ret = cs40l5x_write(dev, addr + offset, word);
+		ret = cirrus_firmware_write_offset(dev, addr, word, offset);
 		if (ret < 0) {
 			return ret;
 		}
+
+		offset += CIRRUS_REGISTER_WIDTH;
 	}
 
 	return 0;
@@ -1893,7 +1516,7 @@ int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custo
 			const struct cs40l5x_pwle_section *const sections,
 			const uint8_t num_sections)
 {
-	__maybe_unused const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
 	int ret;
 
@@ -1912,7 +1535,7 @@ int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custo
 		return ret;
 	}
 
-	ret = k_mutex_lock(&data->lock, CS40L5X_T_WAIT);
+	ret = k_mutex_lock(&data->common.lock, CIRRUS_T_TIMEOUT);
 	if (ret < 0) {
 		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
 		goto error_pm;
@@ -1931,7 +1554,7 @@ int cs40l5x_upload_pwle(const struct device *const dev, const enum cs40l5x_custo
 	data->custom_effects[index] = true;
 
 error_mutex:
-	(void)k_mutex_unlock(&data->lock);
+	(void)k_mutex_unlock(&data->common.lock);
 
 error_pm:
 	(void)pm_device_runtime_put(dev);
@@ -1942,60 +1565,56 @@ error_pm:
 static DEVICE_API(haptics, cs40l5x_driver_api) = {
 	.start_output = &cs40l5x_start_output,
 	.stop_output = &cs40l5x_stop_output,
-	.register_error_callback = &cs40l5x_register_error_callback,
+	.register_error_callback = &cirrus_register_error_callback,
 };
 
 static int cs40l5x_pm_resume(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_EXTERNAL_BOOST) && config->external_boost != NULL) {
-		ret = regulator_enable(config->external_boost);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to enable regulator (%d)", ret);
-			return ret;
-		}
-	}
-
-	ret = pm_device_runtime_get(cs40l5x_get_control_port(dev));
+	ret = pm_device_runtime_get(cirrus_get_control_port(dev));
 	if (ret < 0) {
 		return ret;
 	}
 
 	ret = cs40l5x_write_mailbox(dev, CS40L5X_MBOX_PREVENT_HIBERNATION);
 	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to disable hibernation (%d)", ret);
+
+		(void)pm_device_runtime_put(cirrus_get_control_port(dev));
+
 		return ret;
 	}
 
 	LOG_INST_DBG(config->log, "disabling hibernation");
 
-	return cs40l5x_poll(dev, CS40L5X_REG_HALO_STATE, CS40L5X_EXP_DSP_STANDBY,
-			    CS40L5X_T_DSP_READY);
+	ret = cirrus_firmware_poll(dev, CS40L5X_REG_HALO_STATE, CS40L5X_EXP_DSP_STANDBY,
+				   CS40L5X_T_WAKESOURCE);
+	if (ret < 0) {
+		(void)pm_device_runtime_put(cirrus_get_control_port(dev));
+
+		return ret;
+	}
+
+	return 0;
 }
 
 #ifdef CONFIG_PM_DEVICE
 static int cs40l5x_pm_suspend(const struct device *const dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
+	__maybe_unused const struct cirrus_config *const config = dev->config;
 	int ret;
 
 	ret = cs40l5x_write_mailbox(dev, CS40L5X_MBOX_ALLOW_HIBERNATION);
 	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to allow hibernation (%d)", ret);
 		return ret;
 	}
 
 	LOG_INST_DBG(config->log, "allowing hibernation");
 
-	(void)pm_device_runtime_put(cs40l5x_get_control_port(dev));
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_EXTERNAL_BOOST) && config->external_boost != NULL) {
-		ret = regulator_disable(config->external_boost);
-		if (ret < 0) {
-			LOG_INST_DBG(config->log, "failed to disable regulator (%d)", ret);
-			return ret;
-		}
-	}
+	(void)pm_device_runtime_put(cirrus_get_control_port(dev));
 
 	return 0;
 }
@@ -2005,8 +1624,8 @@ static int cs40l5x_pm_turn_off(const struct device *const dev)
 	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		ret = pm_device_runtime_get(config->reset_gpio.port);
+	if (HAPTICS_CIRRUS_RESET(config)) {
+		ret = pm_device_runtime_get(config->common.reset_gpio.port);
 		if (ret < 0) {
 			return ret;
 		}
@@ -2014,16 +1633,20 @@ static int cs40l5x_pm_turn_off(const struct device *const dev)
 
 	ret = cs40l5x_teardown(dev);
 	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed device teardown (%d)", ret);
+		LOG_INST_DBG(config->common.log, "failed device teardown (%d)", ret);
 		return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		(void)pm_device_runtime_put(config->reset_gpio.port);
+	if (HAPTICS_CS40L5X_EXTERNAL_BOOST(config)) {
+		(void)regulator_disable(config->external_boost);
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		(void)pm_device_runtime_put(config->interrupt_gpio.port);
+	if (HAPTICS_CIRRUS_RESET(config)) {
+		(void)pm_device_runtime_put(config->common.reset_gpio.port);
+	}
+
+	if (HAPTICS_CIRRUS_INTERRUPT(config)) {
+		(void)pm_device_runtime_put(config->common.interrupt_gpio.port);
 	}
 
 	return 0;
@@ -2035,36 +1658,53 @@ static int cs40l5x_pm_turn_on(const struct device *const dev)
 	const struct cs40l5x_config *const config = dev->config;
 	int ret;
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		ret = pm_device_runtime_get(config->reset_gpio.port);
+	if (HAPTICS_CIRRUS_RESET(config)) {
+		ret = pm_device_runtime_get(config->common.reset_gpio.port);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 
-	ret = pm_device_runtime_get(cs40l5x_get_control_port(dev));
+	ret = pm_device_runtime_get(cirrus_get_control_port(dev));
 	if (ret < 0) {
-		goto error_pm_reset;
+		goto error_reset;
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		ret = pm_device_runtime_get(config->interrupt_gpio.port);
+	if (HAPTICS_CIRRUS_INTERRUPT(config)) {
+		ret = pm_device_runtime_get(config->common.interrupt_gpio.port);
 		if (ret < 0) {
-			goto error_pm_io;
+			goto error_control_port;
+		}
+	}
+
+	if (HAPTICS_CS40L5X_EXTERNAL_BOOST(config)) {
+		ret = regulator_enable(config->external_boost);
+		if (ret < 0) {
+			LOG_INST_DBG(config->common.log, "failed to enable regulator (%d)", ret);
+			goto error_interrupt;
 		}
 	}
 
 	ret = cs40l5x_bringup(dev);
 	if (ret < 0) {
-		LOG_INST_DBG(config->log, "failed device bringup (%d)", ret);
+		LOG_INST_ERR(config->common.log, "failed device bringup (%d)", ret);
 	}
 
-error_pm_io:
-	(void)pm_device_runtime_put(cs40l5x_get_control_port(dev));
+	if (HAPTICS_CS40L5X_EXTERNAL_BOOST(config) && ret < 0) {
+		(void)regulator_disable(config->external_boost);
+	}
 
-error_pm_reset:
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL) {
-		(void)pm_device_runtime_put(config->reset_gpio.port);
+error_interrupt:
+	if (HAPTICS_CIRRUS_INTERRUPT(config) && ret < 0) {
+		(void)pm_device_runtime_put(config->common.interrupt_gpio.port);
+	}
+
+error_control_port:
+	(void)pm_device_runtime_put(cirrus_get_control_port(dev));
+
+error_reset:
+	if (HAPTICS_CIRRUS_RESET(config)) {
+		(void)pm_device_runtime_put(config->common.reset_gpio.port);
 	}
 
 	return ret;
@@ -2090,51 +1730,19 @@ static int cs40l5x_pm_action(const struct device *dev, enum pm_device_action act
 
 static int cs40l5x_init(const struct device *dev)
 {
-	const struct cs40l5x_config *const config = dev->config;
 	struct cs40l5x_data *const data = dev->data;
+	int ret;
 
-	if (k_mutex_init(&data->lock) < 0) {
-		return -ENOMEM;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_CALIBRATION) &&
-	    k_sem_init(&data->calibration_semaphore, 0, 1) < 0) {
-		return -ENOMEM;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL) {
-		k_work_init_delayable(&data->interrupt_worker, cs40l5x_interrupt_worker);
-	}
-
-	if (!cs40l5x_is_ready(dev)) {
-		LOG_INST_DBG(config->log, "control port is not ready");
-		return -ENODEV;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_RESET) && config->reset_gpio.port != NULL &&
-	    !gpio_is_ready_dt(&config->reset_gpio)) {
-		LOG_INST_DBG(config->log, "reset GPIO is not ready");
-		return -ENODEV;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_INTERRUPT) && config->interrupt_gpio.port != NULL &&
-	    !gpio_is_ready_dt(&config->interrupt_gpio)) {
-		LOG_INST_DBG(config->log, "interrupt GPIO is not ready");
-		return -ENODEV;
-	}
-
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_TRIGGER)) {
-		for (int i = 0; i < config->trigger_gpios.num_gpio; i++) {
-			if (!gpio_is_ready_dt(&config->trigger_gpios.gpio[i])) {
-				LOG_INST_DBG(config->log, "trigger GPIO is not ready (%s)",
-					     config->trigger_gpios.gpio[i].port->name);
-			}
+	if (IS_ENABLED(CONFIG_HAPTICS_CIRRUS_CALIBRATION)) {
+		ret = k_sem_init(&data->calibration_semaphore, 0, 1);
+		if (ret < 0) {
+			return ret;
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_HAPTICS_CS40L5X_FLASH) && config->flash != NULL &&
-	    !device_is_ready(config->flash)) {
-		LOG_INST_DBG(config->log, "flash device is not ready (%s)", config->flash->name);
+	ret = cirrus_init(dev, cs40l5x_interrupt_worker);
+	if (ret < 0) {
+		return ret;
 	}
 
 	return pm_device_driver_init(dev, cs40l5x_pm_action);
@@ -2147,131 +1755,18 @@ __maybe_unused static int cs40l5x_deinit(const struct device *dev)
 }
 #endif /* CONFIG_PM_DEVICE */
 
-#define HAPTICS_CS40L5X_VALID_TRIGGER(inst)                                                        \
-	IS_EQ(DT_INST_NODE_HAS_PROP(inst, trigger_gpios),                                          \
-	      DT_INST_NODE_HAS_PROP(inst, trigger_mapping))
-
-#define HAPTICS_CS40L5X_BUILD_ASSERTS(inst)                                                        \
-	BUILD_ASSERT(HAPTICS_CS40L5X_VALID_TRIGGER(inst),                                          \
-		     "trigger_mapping is required if trigger_gpios is provided");                  \
-	COND_CODE_1(UTIL_AND(HAPTICS_CS40L5X_VALID_TRIGGER(inst),				   \
-			DT_INST_NODE_HAS_PROP(inst, trigger_gpios)),				   \
-		(BUILD_ASSERT(IS_EQ(DT_INST_PROP_LEN(inst, trigger_gpios),			   \
-			DT_INST_PROP_LEN(inst, trigger_mapping)),				   \
-			"length of trigger_mapping must equal length of trigger_gpios");),	   \
-		(EMPTY)										   \
-	)
-
-#define HAPTICS_CS40L5X_DATA(inst, name)                                                           \
-	.dev = DEVICE_DT_INST_GET(inst), .error_callback = NULL, .output = CS40L5X_ROM_BANK_CMD,   \
-	.custom_effects = {false, false}, .calibration = {.f0 = 0, .redc = 0},
-
-#define HAPTICS_CS40L5X_FALLING_DEFAULT(inst, prop, idx)                                           \
-	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)), (0x38,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)), (0x40,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)), (0x48,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)), (0x50,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),	(0x58,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),	(0x60,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),	(0x68,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)), (0x70,), (EMPTY))
-
-#define HAPTICS_CS40L5X_RISING_DEFAULT(inst, prop, idx)                                            \
-	COND_CODE_1(IS_EQ(3, DT_PROP_BY_IDX(inst, prop, idx)), (0x3C,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(4, DT_PROP_BY_IDX(inst, prop, idx)), (0x44,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(5, DT_PROP_BY_IDX(inst, prop, idx)), (0x4C,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(6, DT_PROP_BY_IDX(inst, prop, idx)), (0x54,),	(EMPTY))		   \
-	COND_CODE_1(IS_EQ(10, DT_PROP_BY_IDX(inst, prop, idx)),	(0x5C,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(11, DT_PROP_BY_IDX(inst, prop, idx)),	(0x64,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(12, DT_PROP_BY_IDX(inst, prop, idx)),	(0x6C,), (EMPTY))		   \
-	COND_CODE_1(IS_EQ(13, DT_PROP_BY_IDX(inst, prop, idx)),	(0x74,), (EMPTY))
-
-#define HAPTICS_CS40L5X_FALLING_DEFAULTS(inst)                                                     \
-	(uint8_t[DT_INST_PROP_LEN(inst, trigger_mapping)])                                         \
-	{                                                                                          \
-		DT_INST_FOREACH_PROP_ELEM(inst, trigger_mapping, HAPTICS_CS40L5X_FALLING_DEFAULT)  \
-	}
-
-#define HAPTICS_CS40L5X_RISING_DEFAULTS(inst)                                                      \
-	(uint8_t[DT_INST_PROP_LEN(inst, trigger_mapping)])                                         \
-	{                                                                                          \
-		DT_INST_FOREACH_PROP_ELEM(inst, trigger_mapping, HAPTICS_CS40L5X_RISING_DEFAULT)   \
-	}
-
-#define HAPTICS_CS40L5X_TRIGGER_GPIO_(inst, prop, idx)                                             \
-	GPIO_DT_SPEC_GET_BY_IDX(inst, trigger_gpios, idx),
-
-#define HAPTICS_CS40L5X_TRIGGER_GPIO(inst)                                                         \
-	(struct gpio_dt_spec[])                                                                    \
-	{                                                                                          \
-		DT_INST_FOREACH_PROP_ELEM(inst, trigger_gpios, HAPTICS_CS40L5X_TRIGGER_GPIO_)      \
-	}
-
-#define HAPTICS_CS40L5X_TRIGGER_GPIOS(inst)                                                        \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, trigger_gpios),					   \
-		(.trigger_gpios = {								   \
-			.gpio = HAPTICS_CS40L5X_TRIGGER_GPIO(inst),				   \
-			.num_gpio = DT_INST_PROP_LEN(inst, trigger_gpios),			   \
-			.rising_edge = HAPTICS_CS40L5X_RISING_DEFAULTS(inst),			   \
-			.falling_edge = HAPTICS_CS40L5X_FALLING_DEFAULTS(inst),			   \
-			.ready = (bool[DT_INST_PROP_LEN(inst, trigger_gpios)]) {0}},),		   \
-		(.trigger_gpios = {								   \
-			.gpio = NULL,								   \
-			.num_gpio = 0,								   \
-			.rising_edge = NULL,							   \
-			.falling_edge = NULL,							   \
-			.ready = NULL},)							   \
-	)
-
-#define HAPTICS_CS40L5X_FLASH_DEVICE(inst)                                                         \
-	DEVICE_DT_GET_OR_NULL(DT_MTD_FROM_PARTITION(DT_INST_PHANDLE(inst, flash_storage)))
-
-#define HAPTICS_CS40L5X_FLASH_OFFSET(inst)                                                         \
-	PARTITION_NODE_OFFSET(DT_INST_PHANDLE(inst, flash_storage)) +                        \
-		DT_INST_PROP_OR(inst, flash_offset, 0)
-
-#define HAPTICS_CS40L5X_FLASH(inst)                                                                \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, flash_storage),	\
-		(COND_CODE_1(DT_PARTITION_EXISTS(DT_INST_PHANDLE(inst, flash_storage)),	   \
-			(.flash = HAPTICS_CS40L5X_FLASH_DEVICE(inst),				   \
-			 .flash_offset = HAPTICS_CS40L5X_FLASH_OFFSET(inst),),			   \
-			(.flash = DEVICE_DT_GET(DT_INST_PHANDLE(inst, flash_storage)),		   \
-			 .flash_offset = DT_INST_PROP_OR(inst, flash_offset, 0),))),		   \
-		(.flash = NULL, .flash_offset = 0,))
-
-#define HAPTICS_CS40L5X_BUS(inst)                                                                  \
-	COND_CODE_1(DT_INST_ON_BUS(inst, i2c),	\
-		(.bus.i2c = I2C_DT_SPEC_INST_GET(inst), .bus_io = &cs40l5x_bus_io_i2c,),	   \
-		(.bus.spi = SPI_DT_SPEC_INST_GET(inst, SPI_OP_MODE_MASTER),		   \
-			.bus_io = &cs40l5x_bus_io_spi,))
-
-#define HAPTICS_CS40L5X_CONFIG(inst, name, id)                                                     \
-	.dev = DEVICE_DT_INST_GET(inst), .dev_id = id,                                             \
-	.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, reset_gpios, {0}),                            \
-	.interrupt_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, {0}),                          \
-	.external_boost = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, external_boost)),            \
-	LOG_INSTANCE_PTR_INIT(log, DT_NODE_FULL_NAME_TOKEN(DT_DRV_INST(inst)), inst)               \
-		HAPTICS_CS40L5X_BUS(inst) HAPTICS_CS40L5X_TRIGGER_GPIOS(inst)                      \
-			HAPTICS_CS40L5X_FLASH(inst)
-
-#define HAPTICS_CS40L5X_INIT(inst, name)                                                           \
-	PM_DEVICE_DT_INST_DEFINE(inst, cs40l5x_pm_action);                                         \
-	COND_CODE_1(CONFIG_PM_DEVICE,								   \
-		(DEVICE_DT_INST_DEINIT_DEFINE(inst, cs40l5x_init, cs40l5x_deinit,		   \
-			PM_DEVICE_DT_INST_GET(inst), &name##_data_##inst, &name##_config_##inst,   \
-			POST_KERNEL, CONFIG_HAPTICS_INIT_PRIORITY, &cs40l5x_driver_api);),	   \
-		(DEVICE_DT_INST_DEFINE(inst, cs40l5x_init, PM_DEVICE_DT_INST_GET(inst),		   \
-			&name##_data_##inst, &name##_config_##inst, POST_KERNEL,		   \
-			CONFIG_HAPTICS_INIT_PRIORITY, &cs40l5x_driver_api);))
-
 #define HAPTICS_CS40L5X_DEFINE(inst, name, id)                                                     \
-	HAPTICS_CS40L5X_BUILD_ASSERTS(inst)                                                        \
+	HAPTICS_CS40L5X_BUILD_ASSERTS(inst);                                                       \
 	LOG_INSTANCE_REGISTER(DT_NODE_FULL_NAME_TOKEN(DT_DRV_INST(inst)), inst,                    \
 			      CONFIG_HAPTICS_LOG_LEVEL);                                           \
 	static const struct cs40l5x_config name##_config_##inst = {                                \
-		HAPTICS_CS40L5X_CONFIG(inst, name, id)};                                           \
-	static struct cs40l5x_data name##_data_##inst = {HAPTICS_CS40L5X_DATA(inst, name)};        \
-	HAPTICS_CS40L5X_INIT(inst, name)
+		.common = HAPTICS_CIRRUS_CONFIG(inst, id),                                         \
+		.external_boost = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, external_boost))};   \
+	static struct cs40l5x_data name##_data_##inst = {.common = HAPTICS_CIRRUS_DATA(inst),      \
+							 .output = CS40L5X_ROM_BANK_CMD,           \
+							 .custom_effects = {false, false}};        \
+	PM_DEVICE_DT_INST_DEFINE(inst, cs40l5x_pm_action);                                         \
+	HAPTICS_CIRRUS_INIT(inst, cs40l5x, name);
 
 #define DT_DRV_COMPAT cirrus_cs40l50
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)

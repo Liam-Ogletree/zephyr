@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Cirrus Logic, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Common properties shared by Cirrus Logic haptic drivers
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: Output pin mapped to the device's reset pin.
+
+  int-gpios:
+    type: phandle-array
+    description: Input pin mapped to the device's interrupt pin.
+
+  trigger-gpios:
+    type: phandle-array
+    description: Output pins mapped to the device's trigger pins.
+
+  trigger-mapping:
+    type: array
+    description: |
+      For each output pin provided to 'trigger-gpios', provide the corresponding device pin number.
+
+  flash-storage:
+    type: phandle
+    description: |
+      Flash storage for device data. Must be a phandle to a flash device or fixed partition.
+
+  flash-offset:
+    type: int
+    description: Flash byte offset to store and load data.
