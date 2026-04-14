@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/haptics.h>
 #include <zephyr/drivers/haptics/cs40l5x.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>

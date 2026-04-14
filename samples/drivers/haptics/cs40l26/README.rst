@@ -2,7 +2,7 @@
    :name: CS40L26 Haptic Driver
    :relevant-api: haptics_interface
 
-   Drive an LRA using the CS40L26/27 haptic driver chip.
+   Drive an LRA using the CS40L26/27 haptic driver.
 
 Overview
 ********

@@ -1,5 +1,5 @@
 sample:
-  name: CS40L5x Haptic Driver Sample
+  name: Cirrus Logic CS40L5x haptic driver sample
 tests:
   sample.drivers.haptics.cs40l5x:
     build_only: true

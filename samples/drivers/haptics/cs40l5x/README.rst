@@ -2,7 +2,7 @@
    :name: CS40L5x Haptic Driver
    :relevant-api: haptics_interface
 
-   Drive an LRA using the CS40L5x haptic driver chip.
+   Drive an LRA using the CS40L5x haptic driver.
 
 Overview
 ********
