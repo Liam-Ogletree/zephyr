@@ -10,6 +10,7 @@
  */
 
 #include "cs40l26.h"
+#include <stdlib.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -37,6 +38,8 @@ LOG_MODULE_REGISTER(CS40L26, CONFIG_HAPTICS_LOG_LEVEL);
 /* Masks */
 #define CS40L26_MASK_F0_ENABLE   BIT(0)
 #define CS40L26_MASK_REDC_ENABLE BIT(1)
+#define CS40L26_MASK_ATTENUATION GENMASK(11, 9)
+#define CS40L26_MASK_BUZ_BANK    BIT(7)
 
 /* Unmasked interrupts */
 #define CS40L26_DSP_VIRTUAL2_MBOX_WR_MASK1 BIT(31)
@@ -98,6 +101,13 @@ LOG_MODULE_REGISTER(CS40L26, CONFIG_HAPTICS_LOG_LEVEL);
 #define CS40L26_MAX_ATTENUATION 0x7FFFFF
 #define CS40L26_NUM_ROM_EFFECTS 39
 #define CS40L26_NUM_BUZ_EFFECTS 1
+
+static const uint8_t cs40l26_trigger_offsets[] = {
+	[CS40L26_GPIO1] = 0x00,
+	[CS40L26_GPIO2] = 0x08,
+	[CS40L26_GPIO3] = 0x10,
+	[CS40L26_GPIO4] = 0x18,
+};
 
 static const uint32_t cs40l26_irq_clear[] = {
 	CIRRUS_WRITE_BE32(0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU)};
@@ -222,8 +232,14 @@ static int cs40l26_process_mailbox(const struct device *const dev)
 		case CS40L26_HAPTIC_COMPLETE_MBOX:
 			LOG_INST_DBG(config->log, "mailbox playback complete");
 			break;
+		case CS40L26_HAPTIC_COMPLETE_GPIO:
+			LOG_INST_DBG(config->log, "trigger playback complete");
+			break;
 		case CS40L26_HAPTIC_TRIGGER_MBOX:
 			LOG_INST_DBG(config->log, "mailbox playback started");
+			break;
+		case CS40L26_HAPTIC_TRIGGER_GPIO:
+			LOG_INST_DBG(config->log, "trigger playback started");
 			break;
 		case CS40L26_AWAKE:
 			LOG_INST_DBG(config->log, "awake");
@@ -639,6 +655,12 @@ static int cs40l26_bringup(const struct device *const dev)
 		}
 	}
 
+	ret = cirrus_trigger_config(dev);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed trigger configuration (%d)", ret);
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -826,6 +848,68 @@ int cs40l26_configure_buzz(const struct device *const dev, const uint32_t freque
 	ret = cirrus_firmware_write(dev, CS40L26_REG_BUZZ_DURATION, duration);
 
 error_mutex:
+	(void)k_mutex_unlock(&data->lock);
+
+error_pm:
+	(void)pm_device_runtime_put(dev);
+
+	return ret;
+}
+
+int cs40l26_configure_trigger(const struct device *const dev, const struct gpio_dt_spec *const gpio,
+			      const enum cs40l26_bank bank, const uint8_t index,
+			      const enum cs40l26_attenuation attenuation,
+			      const enum cs40l26_trigger_edge edge)
+{
+	const struct cirrus_config *const config = dev->config;
+	struct cirrus_data *const data = dev->data;
+	uint8_t idx, offset;
+	uint32_t playback;
+	int ret;
+
+	if (!HAPTICS_CIRRUS_TRIGGER(config)) {
+		LOG_INST_DBG(config->log, "no trigger GPIOs provided");
+		return -EPERM;
+	}
+
+	if (!cs40l26_valid_wavetable_source(dev, bank, index)) {
+		LOG_INST_ERR(config->log, "invalid wavetable selection (%d)", -EINVAL);
+		return -EINVAL;
+	}
+
+	ret = cirrus_get_trigger(dev, gpio, &idx);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "failed to retrieve trigger GPIO (%d)", ret);
+		return ret;
+	}
+
+	offset = cs40l26_trigger_offsets[idx] + ((edge == CS40L26_FALLING_EDGE) ? 4 : 0);
+
+	playback = FIELD_PREP(CS40L26_MASK_ATTENUATION, abs(attenuation)) | index;
+
+	switch (bank) {
+	case CS40L26_ROM_BANK:
+		break;
+	case CS40L26_BUZ_BANK:
+		playback |= CS40L26_MASK_BUZ_BANK;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	ret = pm_device_runtime_get(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = k_mutex_lock(&data->lock, CIRRUS_T_TIMEOUT);
+	if (ret < 0) {
+		LOG_INST_DBG(config->log, "timed out waiting for lock (%d)", ret);
+		goto error_pm;
+	}
+
+	ret = cirrus_firmware_write_offset(dev, CS40L26_REG_GPIO_EVENT_BASE, playback, offset);
+
 	(void)k_mutex_unlock(&data->lock);
 
 error_pm:
@@ -1129,6 +1213,7 @@ __maybe_unused static int cs40l26_deinit(const struct device *dev)
 #endif /* CONFIG_PM_DEVICE */
 
 #define HAPTICS_CS40L26_DEFINE(inst, name, id)                                                     \
+	HAPTICS_CS40L26_BUILD_ASSERTS(inst);                                                       \
 	LOG_INSTANCE_REGISTER(DT_NODE_FULL_NAME_TOKEN(DT_DRV_INST(inst)), inst,                    \
 			      CONFIG_HAPTICS_LOG_LEVEL);                                           \
 	static const struct cirrus_config name##_config_##inst = HAPTICS_CIRRUS_CONFIG(inst, id);  \

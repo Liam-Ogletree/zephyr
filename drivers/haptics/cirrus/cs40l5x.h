@@ -96,9 +96,11 @@ extern "C" {
  * @param[in] inst `DT_DRV_COMPAT` instance number
  */
 #define HAPTICS_CS40L5X_BUILD_ASSERTS(inst)                                                        \
-	BUILD_ASSERT(DT_INST_FOREACH_PROP_ELEM_SEP(inst, trigger_mapping,                          \
-						   HAPTICS_CS40L5X_TRIGGER_MAPPING, (&&)),         \
-		     "the pins provided to trigger_mapping must match a configurable GPIO");
+	BUILD_ASSERT(COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, trigger_mapping),			   \
+				 (DT_INST_FOREACH_PROP_ELEM_SEP(inst, trigger_mapping,             \
+						   HAPTICS_CS40L5X_TRIGGER_MAPPING, (&&))),	   \
+				 (true)),       \
+			"the pins provided to trigger_mapping must match a configurable GPIO");
 
 /**
  * @brief Configuration details common to CS40L5x haptic drivers

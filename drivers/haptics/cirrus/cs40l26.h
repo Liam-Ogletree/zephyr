@@ -44,6 +44,36 @@ extern "C" {
 #define CS40L26_REG_MAILBOX_QUEUE_RD            18
 #define CS40L26_REG_MAILBOX_STATUS              19
 #define CS40L26_REG_SOURCE_ATTENUATION          20
+#define CS40L26_REG_GPIO_EVENT_BASE             21
+
+/** Configurable GPIOs */
+#define CS40L26_GPIO1 1
+#define CS40L26_GPIO2 2
+#define CS40L26_GPIO3 3
+#define CS40L26_GPIO4 4
+
+/**
+ * @brief Compare each pin provided via the `trigger-mapping` property against valid GPIOs
+ *
+ * @param[in] inst `DT_DRV_COMPAT` instance number
+ * @param[in] prop lowercase-and-underscores property name
+ * @param[in] idx logical index into @p prop
+ */
+#define HAPTICS_CS40L26_TRIGGER_MAPPING(inst, prop, idx)                                           \
+	(FOR_EACH_FIXED_ARG(IS_EQ, (||), DT_PROP_BY_IDX(inst, prop, idx), CS40L26_GPIO1,           \
+			    CS40L26_GPIO2, CS40L26_GPIO3, CS40L26_GPIO4))
+
+/**
+ * @brief Verifies that devicetree properties and Kconfig symbols are valid for CS40L26/27 drivers
+ *
+ * @param[in] inst `DT_DRV_COMPAT` instance number
+ */
+#define HAPTICS_CS40L26_BUILD_ASSERTS(inst)                                                        \
+	BUILD_ASSERT(COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, trigger_mapping),			   \
+				 (DT_INST_FOREACH_PROP_ELEM_SEP(inst, trigger_mapping,             \
+						   HAPTICS_CS40L26_TRIGGER_MAPPING, (&&))),	   \
+				 (true)),       \
+			"the pins provided to trigger_mapping must match a configurable GPIO");
 
 /**
  * @brief Data common to CS40L26/27 haptic drivers
