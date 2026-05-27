@@ -101,6 +101,7 @@ LOG_MODULE_REGISTER(CS40L26, CONFIG_HAPTICS_LOG_LEVEL);
 #define CS40L26_MAX_ATTENUATION 0x7FFFFF
 #define CS40L26_NUM_ROM_EFFECTS 39
 #define CS40L26_NUM_BUZ_EFFECTS 1
+#define CS40L26_WSEQ_TERMINATOR 0x00FF0000U
 
 static const uint8_t cs40l26_trigger_offsets[] = {
 	[CS40L26_GPIO1] = 0x00,
@@ -117,7 +118,7 @@ static const uint32_t cs40l26_irq_masks[] = {
 
 static const uint32_t cs40l26_pseq[] = {CIRRUS_WRITE_BE32(
 	0x00000001U, 0x00011073U, 0x000FFFFFU, 0x000304FFU, 0x00FFFFFFU, 0x000304FFU, 0x00FFFFFFU,
-	0x000304FFU, 0x00FFFFFFU, 0x000304FFU, 0x00FFFFFFU)};
+	0x000304FFU, 0x00FFFFFFU, 0x000304FFU, 0x00FFFFFFU, CS40L26_WSEQ_TERMINATOR)};
 
 static inline bool cs40l26_valid_wavetable_source(const struct device *const dev,
 						  const enum cs40l26_bank bank,
