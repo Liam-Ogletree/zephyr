@@ -8,7 +8,16 @@
 
 / {
 	aliases {
-		haptic0 = &cs40l50_0;
+		haptic0 = &cs40l51_0;
+		haptic1 = &cs40l51_1;
+		haptic2 = &cs40l53_2;
+		haptic3 = &cs40l53_3;
+	};
+
+	external_boost: external_boost {
+		compatible = "regulator-fixed";
+		regulator-name = "boost";
+		regulator-always-on;
 	};
 };
 
@@ -21,17 +30,54 @@
 	pinctrl-1 = <&analog_pb6 &analog_pb7>;
 	pinctrl-names = "default", "sleep";
 
-	cs40l50_0: cs40l50@34 {
-		compatible = "cirrus,cs40l50";
-		reg = <0x34>;
+	cs40l51_0: cs40l51@36 {
+		compatible = "cirrus,cs40l51";
+		reg = <0x36>;
+
+		external-boost = <&external_boost>;
 
 		reset-gpios = <&gpioc 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 		int-gpios = <&gpioa 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 
-		trigger-mapping = <11 12 13>;
-		trigger-gpios = <&gpioc 13 GPIO_PULL_UP>,
-				<&gpioc 14 GPIO_PULL_UP>,
-				<&gpioc 15 GPIO_PULL_UP>;
+		trigger-mapping = <11 12>;
+		trigger-gpios = <&gpioa 7 GPIO_PULL_UP>,
+				<&gpioc 2 GPIO_PULL_UP>;
+
+		status = "okay";
+	};
+
+	cs40l51_1: cs40l51@37 {
+		compatible = "cirrus,cs40l51";
+		reg = <0x37>;
+
+		external-boost = <&external_boost>;
+
+		reset-gpios = <&gpioc 1 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+		int-gpios = <&gpioa 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+		trigger-mapping = <11 12>;
+		trigger-gpios = <&gpioc 3 GPIO_PULL_UP>,
+				<&gpioc 5 GPIO_PULL_UP>;
+
+		status = "okay";
+	};
+
+	cs40l53_2: cs40l53@30 {
+		compatible = "cirrus,cs40l53";
+		reg = <0x30>;
+
+		external-boost = <&external_boost>;
+
+		int-gpios = <&gpioa 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+		status = "okay";
+	};
+
+	cs40l53_3: cs40l53@31 {
+		compatible = "cirrus,cs40l53";
+		reg = <0x31>;
+
+		external-boost = <&external_boost>;
 
 		status = "okay";
 	};
